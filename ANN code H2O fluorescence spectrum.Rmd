@@ -1,0 +1,5821 @@
+library(readxl)
+library(dplyr)
+library(tidyr)
+library(stringr)
+
+#situamos la carpeta donde estan los excels
+
+setwd("C:/Users/Mit3vK3y/Desktop/trabajo ivan-davide/espectros") 
+espectros2 <- read_excel(path = "Normalized chosen points.xlsx")
+espectros<-espectros2[c(1:21,43:78),]
+summary(espectros)
+#CON LOS DATOS EXTRAIDOS REALIZAMOS LA SEPARACION EN CONJUNTO DE ENTRENAMIENTO Y DE TESTEO
+
+install.packages("tidyverse")
+install.packages("tidymodels")
+install.packages("skimr")
+install.packages("DataExplorer")
+install.packages("ggpubr")
+install.packages("mosaicData")
+install.packages("h2o")
+
+
+library(tidyverse)
+library(tidymodels)
+library(skimr)
+library(DataExplorer)
+library(ggpubr)
+library(mosaicData)
+library(h2o)
+
+
+todosdatosmodelo<-data.frame()
+todosdatospredict<-data.frame()
+#separar en entrenamiento y testeo
+set.seed(123)
+split_inicial <- initial_split(
+  data   = espectros,
+  prop   = 0.8,
+  strata = `604`
+)
+
+datos_train <- training(split_inicial)
+datos_test  <- testing(split_inicial)
+
+summary(datos_train$`604`)
+summary(datos_test$`604`)
+
+
+h2o.init(
+  nthreads = -1,
+  max_mem_size = "4g"
+)
+h2o.removeAll()
+h2o.no_progress()
+
+
+#aplicar el pretratamiento de los datos
+transformer <- recipe(
+  formula = . ~ .,
+  data =  datos_train
+) %>%
+  update_role(c(concentration,method,time),new_role = "predictor") %>%
+  step_naomit(all_predictors()) %>%
+  step_nzv(all_predictors()) %>%
+  step_center(all_numeric(), -all_outcomes()) %>%
+  step_scale(all_numeric(), -all_outcomes()) %>%
+  step_dummy(all_nominal(), -all_outcomes())
+
+transformer
+
+# Se entrena el objeto recipe
+transformer_fit <- prep(transformer)
+
+# Se aplican las transformaciones al conjunto de entrenamiento y de test
+datos_train_prep <- bake(transformer_fit, new_data = datos_train)
+datos_test_prep  <- bake(transformer_fit, new_data = datos_test)
+
+glimpse(datos_train_prep)
+
+
+#trasnferir al cluster
+datos_train  <- as.h2o(datos_train_prep, key = "datos_train")
+datos_test   <- as.h2o(datos_test_prep, key = "datos_test")
+
+
+# Espacio de búsqueda de cada hiperparámetro
+# ==============================================================================
+hiperparametros <- list(
+  epochs = c(50, 100, 500,50000),
+  hidden = list(5, 10, 25, 50, c(10, 10),c(25,25,25),100)
+)
+
+
+
+# Búsqueda por validación cruzada
+# ==============================================================================
+variable_respuesta <- '604'
+predictores <- c("method_HP","method_P","time")
+
+grid <- h2o.grid(
+  algorithm    = "deeplearning",
+  activation   = "Rectifier",
+  x            = predictores,
+  y            = variable_respuesta,
+  training_frame  = datos_train,
+  nfolds       = 3, #validacion cruzada
+  standardize  = FALSE,
+  hyper_params = hiperparametros,
+  search_criteria = list(strategy = "Cartesian"),
+  seed         = 123,
+  grid_id      = "grid"
+)
+
+# Resultados del grid
+# ==============================================================================
+resultados_grid <- h2o.getGrid(
+  sort_by = 'rmse',
+  grid_id = "grid",
+  decreasing = FALSE
+)
+data.frame(resultados_grid@summary_table)
+
+
+# Mejor modelo encontrado
+# ==============================================================================
+modelo_final <- h2o.getModel(resultados_grid@model_ids[[1]])
+
+
+
+#error del test
+
+predicciones1 <- h2o.predict(
+  object  = modelo_final,
+  newdata = datos_test 
+)
+
+
+
+predicciones1 <- predicciones1 %>%
+  as_tibble() %>%
+  mutate(valor_real = as.vector(datos_test$`604`))
+
+predicciones1
+
+modelo_final <- h2o.getModel(resultados_grid@model_ids[[2]])
+
+
+
+#error del test
+
+predicciones2 <- h2o.predict(
+  object  = modelo_final,
+  newdata = datos_test 
+)
+
+
+
+predicciones2 <- predicciones2 %>%
+  as_tibble() %>%
+  mutate(valor_real = as.vector(datos_test$`604`))
+predicciones2
+
+modelo_final <- h2o.getModel(resultados_grid@model_ids[[3]])
+
+
+
+#error del test
+
+predicciones3 <- h2o.predict(
+  object  = modelo_final,
+  newdata = datos_test 
+)
+
+
+
+predicciones3 <- predicciones3 %>%
+  as_tibble() %>%
+  mutate(valor_real = as.vector(datos_test$`604`))
+predicciones3
+
+modelos<-data.frame(resultados_grid@summary_table)
+
+datomodelo<-data.frame()
+datomodelo<-modelos[1,]
+datomodelo<-rbind(datomodelo,modelos[2,])
+datomodelo<-rbind(datomodelo,modelos[3,])
+
+prediccionesdatos<-data.frame()
+prediccionesdatos<-predicciones1
+prediccionesdatos<-rbind(prediccionesdatos,predicciones2)
+prediccionesdatos<-rbind(prediccionesdatos,predicciones3)
+
+
+datomodelo
+print(prediccionesdatos, n=30)
+todosdatosmodelo<-datomodelo
+todosdatospredict<-prediccionesdatos
+
+
+set.seed(123)
+split_inicial <- initial_split(
+  data   = espectros,
+  prop   = 0.8,
+  strata = `611`
+)
+
+datos_train <- training(split_inicial)
+datos_test  <- testing(split_inicial)
+
+summary(datos_train$`611`)
+summary(datos_test$`611`)
+
+
+h2o.init(
+  nthreads = -1,
+  max_mem_size = "4g"
+)
+h2o.removeAll()
+h2o.no_progress()
+
+
+#aplicar el pretratamiento de los datos
+transformer <- recipe(
+  formula = . ~ .,
+  data =  datos_train
+) %>%
+  update_role(c(concentration,method,time),new_role = "predictor") %>%
+  step_naomit(all_predictors()) %>%
+  step_nzv(all_predictors()) %>%
+  step_center(all_numeric(), -all_outcomes()) %>%
+  step_scale(all_numeric(), -all_outcomes()) %>%
+  step_dummy(all_nominal(), -all_outcomes())
+
+transformer
+
+# Se entrena el objeto recipe
+transformer_fit <- prep(transformer)
+
+# Se aplican las transformaciones al conjunto de entrenamiento y de test
+datos_train_prep <- bake(transformer_fit, new_data = datos_train)
+datos_test_prep  <- bake(transformer_fit, new_data = datos_test)
+
+glimpse(datos_train_prep)
+
+
+#trasnferir al cluster
+datos_train  <- as.h2o(datos_train_prep, key = "datos_train")
+datos_test   <- as.h2o(datos_test_prep, key = "datos_test")
+
+
+# Espacio de búsqueda de cada hiperparámetro
+# ==============================================================================
+hiperparametros <- list(
+  epochs = c(50, 100, 500,50000),
+  hidden = list(5, 10, 25, 50, c(10, 10),c(25,25,25),100)
+)
+
+
+
+# Búsqueda por validación cruzada
+# ==============================================================================
+variable_respuesta <- '611'
+predictores <- c("method_HP","method_P","time")
+
+grid <- h2o.grid(
+  algorithm    = "deeplearning",
+  activation   = "Rectifier",
+  x            = predictores,
+  y            = variable_respuesta,
+  training_frame  = datos_train,
+  nfolds       = 3, #validacion cruzada
+  standardize  = FALSE,
+  hyper_params = hiperparametros,
+  search_criteria = list(strategy = "Cartesian"),
+  seed         = 123,
+  grid_id      = "grid"
+)
+
+# Resultados del grid
+# ==============================================================================
+resultados_grid <- h2o.getGrid(
+  sort_by = 'rmse',
+  grid_id = "grid",
+  decreasing = FALSE
+)
+data.frame(resultados_grid@summary_table)
+
+
+# Mejor modelo encontrado
+# ==============================================================================
+modelo_final <- h2o.getModel(resultados_grid@model_ids[[1]])
+
+
+
+#error del test
+
+predicciones1 <- h2o.predict(
+  object  = modelo_final,
+  newdata = datos_test 
+)
+
+
+
+predicciones1 <- predicciones1 %>%
+  as_tibble() %>%
+  mutate(valor_real = as.vector(datos_test$`611`))
+
+
+
+modelo_final <- h2o.getModel(resultados_grid@model_ids[[2]])
+
+
+
+#error del test
+
+predicciones2 <- h2o.predict(
+  object  = modelo_final,
+  newdata = datos_test 
+)
+
+
+
+predicciones2 <- predicciones2 %>%
+  as_tibble() %>%
+  mutate(valor_real = as.vector(datos_test$`611`))
+predicciones2
+
+modelo_final <- h2o.getModel(resultados_grid@model_ids[[3]])
+
+
+
+#error del test
+
+predicciones3 <- h2o.predict(
+  object  = modelo_final,
+  newdata = datos_test 
+)
+
+
+
+predicciones3 <- predicciones3 %>%
+  as_tibble() %>%
+  mutate(valor_real = as.vector(datos_test$`611`))
+predicciones3
+
+modelos<-data.frame(resultados_grid@summary_table)
+
+datomodelo<-data.frame()
+datomodelo<-modelos[1,]
+datomodelo<-rbind(datomodelo,modelos[2,])
+datomodelo<-rbind(datomodelo,modelos[3,])
+
+prediccionesdatos<-data.frame()
+prediccionesdatos<-predicciones1
+prediccionesdatos<-rbind(prediccionesdatos,predicciones2)
+prediccionesdatos<-rbind(prediccionesdatos,predicciones3)
+
+
+datomodelo
+print(prediccionesdatos, n=30)
+
+todosdatosmodelo<-rbind(todosdatosmodelo,datomodelo)
+todosdatospredict<-rbind(todosdatospredict,prediccionesdatos)
+
+
+
+
+
+
+set.seed(123)
+split_inicial <- initial_split(
+  data   = espectros,
+  prop   = 0.8,
+  strata = `632`
+)
+
+datos_train <- training(split_inicial)
+datos_test  <- testing(split_inicial)
+
+summary(datos_train$`632`)
+summary(datos_test$`632`)
+
+
+h2o.init(
+  nthreads = -1,
+  max_mem_size = "4g"
+)
+h2o.removeAll()
+h2o.no_progress()
+
+
+#aplicar el pretratamiento de los datos
+transformer <- recipe(
+  formula = . ~ .,
+  data =  datos_train
+) %>%
+  update_role(c(concentration,method,time),new_role = "predictor") %>%
+  step_naomit(all_predictors()) %>%
+  step_nzv(all_predictors()) %>%
+  step_center(all_numeric(), -all_outcomes()) %>%
+  step_scale(all_numeric(), -all_outcomes()) %>%
+  step_dummy(all_nominal(), -all_outcomes())
+
+transformer
+
+# Se entrena el objeto recipe
+transformer_fit <- prep(transformer)
+
+# Se aplican las transformaciones al conjunto de entrenamiento y de test
+datos_train_prep <- bake(transformer_fit, new_data = datos_train)
+datos_test_prep  <- bake(transformer_fit, new_data = datos_test)
+
+glimpse(datos_train_prep)
+
+
+#trasnferir al cluster
+datos_train  <- as.h2o(datos_train_prep, key = "datos_train")
+datos_test   <- as.h2o(datos_test_prep, key = "datos_test")
+
+
+# Espacio de búsqueda de cada hiperparámetro
+# ==============================================================================
+hiperparametros <- list(
+  epochs = c(50, 100, 500,50000),
+  hidden = list(5, 10, 25, 50, c(10, 10),c(25,25,25),100)
+)
+
+
+
+# Búsqueda por validación cruzada
+# ==============================================================================
+variable_respuesta <- '632'
+predictores <- c("method_HP","method_P","time")
+
+grid <- h2o.grid(
+  algorithm    = "deeplearning",
+  activation   = "Rectifier",
+  x            = predictores,
+  y            = variable_respuesta,
+  training_frame  = datos_train,
+  nfolds       = 3, #validacion cruzada
+  standardize  = FALSE,
+  hyper_params = hiperparametros,
+  search_criteria = list(strategy = "Cartesian"),
+  seed         = 123,
+  grid_id      = "grid"
+)
+
+# Resultados del grid
+# ==============================================================================
+resultados_grid <- h2o.getGrid(
+  sort_by = 'rmse',
+  grid_id = "grid",
+  decreasing = FALSE
+)
+data.frame(resultados_grid@summary_table)
+
+
+# Mejor modelo encontrado
+# ==============================================================================
+modelo_final <- h2o.getModel(resultados_grid@model_ids[[1]])
+
+
+
+#error del test
+
+predicciones1 <- h2o.predict(
+  object  = modelo_final,
+  newdata = datos_test 
+)
+
+
+
+predicciones1 <- predicciones1 %>%
+  as_tibble() %>%
+  mutate(valor_real = as.vector(datos_test$`632`))
+
+
+
+modelo_final <- h2o.getModel(resultados_grid@model_ids[[2]])
+
+
+
+#error del test
+
+predicciones2 <- h2o.predict(
+  object  = modelo_final,
+  newdata = datos_test 
+)
+
+
+
+predicciones2 <- predicciones2 %>%
+  as_tibble() %>%
+  mutate(valor_real = as.vector(datos_test$`632`))
+predicciones2
+
+modelo_final <- h2o.getModel(resultados_grid@model_ids[[3]])
+
+
+
+#error del test
+
+predicciones3 <- h2o.predict(
+  object  = modelo_final,
+  newdata = datos_test 
+)
+
+
+
+predicciones3 <- predicciones3 %>%
+  as_tibble() %>%
+  mutate(valor_real = as.vector(datos_test$`632`))
+predicciones3
+
+modelos<-data.frame(resultados_grid@summary_table)
+
+datomodelo<-data.frame()
+datomodelo<-modelos[1,]
+datomodelo<-rbind(datomodelo,modelos[2,])
+datomodelo<-rbind(datomodelo,modelos[3,])
+
+prediccionesdatos<-data.frame()
+prediccionesdatos<-predicciones1
+prediccionesdatos<-rbind(prediccionesdatos,predicciones2)
+prediccionesdatos<-rbind(prediccionesdatos,predicciones3)
+
+
+datomodelo
+print(prediccionesdatos, n=30)
+
+todosdatosmodelo<-rbind(todosdatosmodelo,datomodelo)
+todosdatospredict<-rbind(todosdatospredict,prediccionesdatos)
+
+
+
+set.seed(123)
+split_inicial <- initial_split(
+  data   = espectros,
+  prop   = 0.8,
+  strata = `643`
+)
+
+datos_train <- training(split_inicial)
+datos_test  <- testing(split_inicial)
+
+summary(datos_train$`643`)
+summary(datos_test$`643`)
+
+
+h2o.init(
+  nthreads = -1,
+  max_mem_size = "4g"
+)
+h2o.removeAll()
+h2o.no_progress()
+
+
+#aplicar el pretratamiento de los datos
+transformer <- recipe(
+  formula = . ~ .,
+  data =  datos_train
+) %>%
+  update_role(c(concentration,method,time),new_role = "predictor") %>%
+  step_naomit(all_predictors()) %>%
+  step_nzv(all_predictors()) %>%
+  step_center(all_numeric(), -all_outcomes()) %>%
+  step_scale(all_numeric(), -all_outcomes()) %>%
+  step_dummy(all_nominal(), -all_outcomes())
+
+transformer
+
+# Se entrena el objeto recipe
+transformer_fit <- prep(transformer)
+
+# Se aplican las transformaciones al conjunto de entrenamiento y de test
+datos_train_prep <- bake(transformer_fit, new_data = datos_train)
+datos_test_prep  <- bake(transformer_fit, new_data = datos_test)
+
+glimpse(datos_train_prep)
+
+
+#trasnferir al cluster
+datos_train  <- as.h2o(datos_train_prep, key = "datos_train")
+datos_test   <- as.h2o(datos_test_prep, key = "datos_test")
+
+
+# Espacio de búsqueda de cada hiperparámetro
+# ==============================================================================
+hiperparametros <- list(
+  epochs = c(50, 100, 500,50000),
+  hidden = list(5, 10, 25, 50, c(10, 10),c(25,25,25),100)
+)
+
+
+
+# Búsqueda por validación cruzada
+# ==============================================================================
+variable_respuesta <- '643'
+predictores <- c("method_HP","method_P","time")
+
+grid <- h2o.grid(
+  algorithm    = "deeplearning",
+  activation   = "Rectifier",
+  x            = predictores,
+  y            = variable_respuesta,
+  training_frame  = datos_train,
+  nfolds       = 3, #validacion cruzada
+  standardize  = FALSE,
+  hyper_params = hiperparametros,
+  search_criteria = list(strategy = "Cartesian"),
+  seed         = 123,
+  grid_id      = "grid"
+)
+
+# Resultados del grid
+# ==============================================================================
+resultados_grid <- h2o.getGrid(
+  sort_by = 'rmse',
+  grid_id = "grid",
+  decreasing = FALSE
+)
+data.frame(resultados_grid@summary_table)
+
+
+# Mejor modelo encontrado
+# ==============================================================================
+modelo_final <- h2o.getModel(resultados_grid@model_ids[[1]])
+
+
+
+#error del test
+
+predicciones1 <- h2o.predict(
+  object  = modelo_final,
+  newdata = datos_test 
+)
+
+
+
+predicciones1 <- predicciones1 %>%
+  as_tibble() %>%
+  mutate(valor_real = as.vector(datos_test$`643`))
+
+predicciones1
+
+modelo_final <- h2o.getModel(resultados_grid@model_ids[[2]])
+
+
+
+#error del test
+
+predicciones2 <- h2o.predict(
+  object  = modelo_final,
+  newdata = datos_test 
+)
+
+
+
+predicciones2 <- predicciones2 %>%
+  as_tibble() %>%
+  mutate(valor_real = as.vector(datos_test$`643`))
+predicciones2
+
+modelo_final <- h2o.getModel(resultados_grid@model_ids[[3]])
+
+
+
+#error del test
+
+predicciones3 <- h2o.predict(
+  object  = modelo_final,
+  newdata = datos_test 
+)
+
+
+
+predicciones3 <- predicciones3 %>%
+  as_tibble() %>%
+  mutate(valor_real = as.vector(datos_test$`643`))
+predicciones3
+
+modelos<-data.frame(resultados_grid@summary_table)
+
+datomodelo<-data.frame()
+datomodelo<-modelos[1,]
+datomodelo<-rbind(datomodelo,modelos[2,])
+datomodelo<-rbind(datomodelo,modelos[3,])
+
+prediccionesdatos<-data.frame()
+prediccionesdatos<-predicciones1
+prediccionesdatos<-rbind(prediccionesdatos,predicciones2)
+prediccionesdatos<-rbind(prediccionesdatos,predicciones3)
+
+
+datomodelo
+print(prediccionesdatos, n=30)
+
+todosdatosmodelo<-rbind(todosdatosmodelo,datomodelo)
+todosdatospredict<-rbind(todosdatospredict,prediccionesdatos)
+
+
+
+set.seed(123)
+split_inicial <- initial_split(
+  data   = espectros,
+  prop   = 0.8,
+  strata = `644`
+)
+
+datos_train <- training(split_inicial)
+datos_test  <- testing(split_inicial)
+
+summary(datos_train$`644`)
+summary(datos_test$`644`)
+
+
+h2o.init(
+  nthreads = -1,
+  max_mem_size = "4g"
+)
+h2o.removeAll()
+h2o.no_progress()
+
+
+#aplicar el pretratamiento de los datos
+transformer <- recipe(
+  formula = . ~ .,
+  data =  datos_train
+) %>%
+  update_role(c(concentration,method,time),new_role = "predictor") %>%
+  step_naomit(all_predictors()) %>%
+  step_nzv(all_predictors()) %>%
+  step_center(all_numeric(), -all_outcomes()) %>%
+  step_scale(all_numeric(), -all_outcomes()) %>%
+  step_dummy(all_nominal(), -all_outcomes())
+
+transformer
+
+# Se entrena el objeto recipe
+transformer_fit <- prep(transformer)
+
+# Se aplican las transformaciones al conjunto de entrenamiento y de test
+datos_train_prep <- bake(transformer_fit, new_data = datos_train)
+datos_test_prep  <- bake(transformer_fit, new_data = datos_test)
+
+glimpse(datos_train_prep)
+
+
+#trasnferir al cluster
+datos_train  <- as.h2o(datos_train_prep, key = "datos_train")
+datos_test   <- as.h2o(datos_test_prep, key = "datos_test")
+
+
+# Espacio de búsqueda de cada hiperparámetro
+# ==============================================================================
+hiperparametros <- list(
+  epochs = c(50, 100, 500,50000),
+  hidden = list(5, 10, 25, 50, c(10, 10),c(25,25,25),100)
+)
+
+
+
+# Búsqueda por validación cruzada
+# ==============================================================================
+variable_respuesta <- '644'
+predictores <- c("method_HP","method_P","time")
+
+grid <- h2o.grid(
+  algorithm    = "deeplearning",
+  activation   = "Rectifier",
+  x            = predictores,
+  y            = variable_respuesta,
+  training_frame  = datos_train,
+  nfolds       = 3, #validacion cruzada
+  standardize  = FALSE,
+  hyper_params = hiperparametros,
+  search_criteria = list(strategy = "Cartesian"),
+  seed         = 123,
+  grid_id      = "grid"
+)
+
+# Resultados del grid
+# ==============================================================================
+resultados_grid <- h2o.getGrid(
+  sort_by = 'rmse',
+  grid_id = "grid",
+  decreasing = FALSE
+)
+data.frame(resultados_grid@summary_table)
+
+
+# Mejor modelo encontrado
+# ==============================================================================
+modelo_final <- h2o.getModel(resultados_grid@model_ids[[1]])
+
+
+
+#error del test
+
+predicciones1 <- h2o.predict(
+  object  = modelo_final,
+  newdata = datos_test 
+)
+
+
+
+predicciones1 <- predicciones1 %>%
+  as_tibble() %>%
+  mutate(valor_real = as.vector(datos_test$`644`))
+
+predicciones1
+
+modelo_final <- h2o.getModel(resultados_grid@model_ids[[2]])
+
+
+
+#error del test
+
+predicciones2 <- h2o.predict(
+  object  = modelo_final,
+  newdata = datos_test 
+)
+
+
+
+predicciones2 <- predicciones2 %>%
+  as_tibble() %>%
+  mutate(valor_real = as.vector(datos_test$`644`))
+predicciones2
+
+modelo_final <- h2o.getModel(resultados_grid@model_ids[[3]])
+
+
+
+#error del test
+
+predicciones3 <- h2o.predict(
+  object  = modelo_final,
+  newdata = datos_test 
+)
+
+
+
+predicciones3 <- predicciones3 %>%
+  as_tibble() %>%
+  mutate(valor_real = as.vector(datos_test$`644`))
+predicciones3
+
+modelos<-data.frame(resultados_grid@summary_table)
+
+datomodelo<-data.frame()
+datomodelo<-modelos[1,]
+datomodelo<-rbind(datomodelo,modelos[2,])
+datomodelo<-rbind(datomodelo,modelos[3,])
+
+prediccionesdatos<-data.frame()
+prediccionesdatos<-predicciones1
+prediccionesdatos<-rbind(prediccionesdatos,predicciones2)
+prediccionesdatos<-rbind(prediccionesdatos,predicciones3)
+
+
+datomodelo
+print(prediccionesdatos, n=30)
+
+todosdatosmodelo<-rbind(todosdatosmodelo,datomodelo)
+todosdatospredict<-rbind(todosdatospredict,prediccionesdatos)
+
+
+set.seed(123)
+split_inicial <- initial_split(
+  data   = espectros,
+  prop   = 0.8,
+  strata = `659`
+)
+
+datos_train <- training(split_inicial)
+datos_test  <- testing(split_inicial)
+
+summary(datos_train$`659`)
+summary(datos_test$`659`)
+
+
+h2o.init(
+  nthreads = -1,
+  max_mem_size = "4g"
+)
+h2o.removeAll()
+h2o.no_progress()
+
+
+#aplicar el pretratamiento de los datos
+transformer <- recipe(
+  formula = . ~ .,
+  data =  datos_train
+) %>%
+  update_role(c(concentration,method,time),new_role = "predictor") %>%
+  step_naomit(all_predictors()) %>%
+  step_nzv(all_predictors()) %>%
+  step_center(all_numeric(), -all_outcomes()) %>%
+  step_scale(all_numeric(), -all_outcomes()) %>%
+  step_dummy(all_nominal(), -all_outcomes())
+
+transformer
+
+# Se entrena el objeto recipe
+transformer_fit <- prep(transformer)
+
+# Se aplican las transformaciones al conjunto de entrenamiento y de test
+datos_train_prep <- bake(transformer_fit, new_data = datos_train)
+datos_test_prep  <- bake(transformer_fit, new_data = datos_test)
+
+glimpse(datos_train_prep)
+
+
+#trasnferir al cluster
+datos_train  <- as.h2o(datos_train_prep, key = "datos_train")
+datos_test   <- as.h2o(datos_test_prep, key = "datos_test")
+
+
+# Espacio de búsqueda de cada hiperparámetro
+# ==============================================================================
+hiperparametros <- list(
+  epochs = c(50, 100, 500,50000),
+  hidden = list(5, 10, 25, 50, c(10, 10),c(25,25,25),100)
+)
+
+
+
+# Búsqueda por validación cruzada
+# ==============================================================================
+variable_respuesta <- '659'
+predictores <- c("method_HP","method_P","time")
+
+grid <- h2o.grid(
+  algorithm    = "deeplearning",
+  activation   = "Rectifier",
+  x            = predictores,
+  y            = variable_respuesta,
+  training_frame  = datos_train,
+  nfolds       = 3, #validacion cruzada
+  standardize  = FALSE,
+  hyper_params = hiperparametros,
+  search_criteria = list(strategy = "Cartesian"),
+  seed         = 123,
+  grid_id      = "grid"
+)
+
+# Resultados del grid
+# ==============================================================================
+resultados_grid <- h2o.getGrid(
+  sort_by = 'rmse',
+  grid_id = "grid",
+  decreasing = FALSE
+)
+data.frame(resultados_grid@summary_table)
+
+
+# Mejor modelo encontrado
+# ==============================================================================
+modelo_final <- h2o.getModel(resultados_grid@model_ids[[1]])
+
+
+
+#error del test
+
+predicciones1 <- h2o.predict(
+  object  = modelo_final,
+  newdata = datos_test 
+)
+
+
+
+predicciones1 <- predicciones1 %>%
+  as_tibble() %>%
+  mutate(valor_real = as.vector(datos_test$`659`))
+
+predicciones1
+
+modelo_final <- h2o.getModel(resultados_grid@model_ids[[2]])
+
+
+
+#error del test
+
+predicciones2 <- h2o.predict(
+  object  = modelo_final,
+  newdata = datos_test 
+)
+
+
+
+predicciones2 <- predicciones2 %>%
+  as_tibble() %>%
+  mutate(valor_real = as.vector(datos_test$`659`))
+predicciones2
+
+modelo_final <- h2o.getModel(resultados_grid@model_ids[[3]])
+
+
+
+#error del test
+
+predicciones3 <- h2o.predict(
+  object  = modelo_final,
+  newdata = datos_test 
+)
+
+
+
+predicciones3 <- predicciones3 %>%
+  as_tibble() %>%
+  mutate(valor_real = as.vector(datos_test$`659`))
+predicciones3
+
+modelos<-data.frame(resultados_grid@summary_table)
+
+datomodelo<-data.frame()
+datomodelo<-modelos[1,]
+datomodelo<-rbind(datomodelo,modelos[2,])
+datomodelo<-rbind(datomodelo,modelos[3,])
+
+prediccionesdatos<-data.frame()
+prediccionesdatos<-predicciones1
+prediccionesdatos<-rbind(prediccionesdatos,predicciones2)
+prediccionesdatos<-rbind(prediccionesdatos,predicciones3)
+
+
+datomodelo
+print(prediccionesdatos, n=30)
+
+todosdatosmodelo<-rbind(todosdatosmodelo,datomodelo)
+todosdatospredict<-rbind(todosdatospredict,prediccionesdatos)
+
+
+
+set.seed(123)
+split_inicial <- initial_split(
+  data   = espectros,
+  prop   = 0.8,
+  strata = `790`
+)
+
+datos_train <- training(split_inicial)
+datos_test  <- testing(split_inicial)
+
+summary(datos_train$`790`)
+summary(datos_test$`790`)
+
+
+h2o.init(
+  nthreads = -1,
+  max_mem_size = "4g"
+)
+h2o.removeAll()
+h2o.no_progress()
+
+
+#aplicar el pretratamiento de los datos
+transformer <- recipe(
+  formula = . ~ .,
+  data =  datos_train
+) %>%
+  update_role(c(concentration,method,time),new_role = "predictor") %>%
+  step_naomit(all_predictors()) %>%
+  step_nzv(all_predictors()) %>%
+  step_center(all_numeric(), -all_outcomes()) %>%
+  step_scale(all_numeric(), -all_outcomes()) %>%
+  step_dummy(all_nominal(), -all_outcomes())
+
+transformer
+
+# Se entrena el objeto recipe
+transformer_fit <- prep(transformer)
+
+# Se aplican las transformaciones al conjunto de entrenamiento y de test
+datos_train_prep <- bake(transformer_fit, new_data = datos_train)
+datos_test_prep  <- bake(transformer_fit, new_data = datos_test)
+
+glimpse(datos_train_prep)
+
+
+#trasnferir al cluster
+datos_train  <- as.h2o(datos_train_prep, key = "datos_train")
+datos_test   <- as.h2o(datos_test_prep, key = "datos_test")
+
+
+# Espacio de búsqueda de cada hiperparámetro
+# ==============================================================================
+hiperparametros <- list(
+  epochs = c(50, 100, 500,50000),
+  hidden = list(5, 10, 25, 50, c(10, 10),c(25,25,25),100)
+)
+
+
+
+# Búsqueda por validación cruzada
+# ==============================================================================
+variable_respuesta <- '790'
+predictores <- c("method_HP","method_P","time")
+
+grid <- h2o.grid(
+  algorithm    = "deeplearning",
+  activation   = "Rectifier",
+  x            = predictores,
+  y            = variable_respuesta,
+  training_frame  = datos_train,
+  nfolds       = 3, #validacion cruzada
+  standardize  = FALSE,
+  hyper_params = hiperparametros,
+  search_criteria = list(strategy = "Cartesian"),
+  seed         = 123,
+  grid_id      = "grid"
+)
+
+# Resultados del grid
+# ==============================================================================
+resultados_grid <- h2o.getGrid(
+  sort_by = 'rmse',
+  grid_id = "grid",
+  decreasing = FALSE
+)
+data.frame(resultados_grid@summary_table)
+
+
+# Mejor modelo encontrado
+# ==============================================================================
+modelo_final <- h2o.getModel(resultados_grid@model_ids[[1]])
+
+
+
+#error del test
+
+predicciones1 <- h2o.predict(
+  object  = modelo_final,
+  newdata = datos_test 
+)
+
+
+
+predicciones1 <- predicciones1 %>%
+  as_tibble() %>%
+  mutate(valor_real = as.vector(datos_test$`790`))
+
+predicciones1
+
+modelo_final <- h2o.getModel(resultados_grid@model_ids[[2]])
+
+
+
+#error del test
+
+predicciones2 <- h2o.predict(
+  object  = modelo_final,
+  newdata = datos_test 
+)
+
+
+
+predicciones2 <- predicciones2 %>%
+  as_tibble() %>%
+  mutate(valor_real = as.vector(datos_test$`790`))
+predicciones2
+
+modelo_final <- h2o.getModel(resultados_grid@model_ids[[3]])
+
+
+
+#error del test
+
+predicciones3 <- h2o.predict(
+  object  = modelo_final,
+  newdata = datos_test 
+)
+
+
+
+predicciones3 <- predicciones3 %>%
+  as_tibble() %>%
+  mutate(valor_real = as.vector(datos_test$`790`))
+predicciones3
+
+modelos<-data.frame(resultados_grid@summary_table)
+
+datomodelo<-data.frame()
+datomodelo<-modelos[1,]
+datomodelo<-rbind(datomodelo,modelos[2,])
+datomodelo<-rbind(datomodelo,modelos[3,])
+
+prediccionesdatos<-data.frame()
+prediccionesdatos<-predicciones1
+prediccionesdatos<-rbind(prediccionesdatos,predicciones2)
+prediccionesdatos<-rbind(prediccionesdatos,predicciones3)
+
+
+datomodelo
+print(prediccionesdatos, n=30)
+
+todosdatosmodelo<-rbind(todosdatosmodelo,datomodelo)
+todosdatospredict<-rbind(todosdatospredict,prediccionesdatos)
+
+
+
+
+set.seed(123)
+split_inicial <- initial_split(
+  data   = espectros,
+  prop   = 0.8,
+  strata = `798`
+)
+
+datos_train <- training(split_inicial)
+datos_test  <- testing(split_inicial)
+
+summary(datos_train$`798`)
+summary(datos_test$`798`)
+
+
+h2o.init(
+  nthreads = -1,
+  max_mem_size = "4g"
+)
+h2o.removeAll()
+h2o.no_progress()
+
+
+#aplicar el pretratamiento de los datos
+transformer <- recipe(
+  formula = . ~ .,
+  data =  datos_train
+) %>%
+  update_role(c(concentration,method,time),new_role = "predictor") %>%
+  step_naomit(all_predictors()) %>%
+  step_nzv(all_predictors()) %>%
+  step_center(all_numeric(), -all_outcomes()) %>%
+  step_scale(all_numeric(), -all_outcomes()) %>%
+  step_dummy(all_nominal(), -all_outcomes())
+
+transformer
+
+# Se entrena el objeto recipe
+transformer_fit <- prep(transformer)
+
+# Se aplican las transformaciones al conjunto de entrenamiento y de test
+datos_train_prep <- bake(transformer_fit, new_data = datos_train)
+datos_test_prep  <- bake(transformer_fit, new_data = datos_test)
+
+glimpse(datos_train_prep)
+
+
+#trasnferir al cluster
+datos_train  <- as.h2o(datos_train_prep, key = "datos_train")
+datos_test   <- as.h2o(datos_test_prep, key = "datos_test")
+
+
+# Espacio de búsqueda de cada hiperparámetro
+# ==============================================================================
+hiperparametros <- list(
+  epochs = c(50, 100, 500,50000),
+  hidden = list(5, 10, 25, 50, c(10, 10),c(25,25,25),100)
+)
+
+
+
+# Búsqueda por validación cruzada
+# ==============================================================================
+variable_respuesta <- '798'
+predictores <- c("method_HP","method_P","time")
+
+grid <- h2o.grid(
+  algorithm    = "deeplearning",
+  activation   = "Rectifier",
+  x            = predictores,
+  y            = variable_respuesta,
+  training_frame  = datos_train,
+  nfolds       = 3, #validacion cruzada
+  standardize  = FALSE,
+  hyper_params = hiperparametros,
+  search_criteria = list(strategy = "Cartesian"),
+  seed         = 123,
+  grid_id      = "grid"
+)
+
+# Resultados del grid
+# ==============================================================================
+resultados_grid <- h2o.getGrid(
+  sort_by = 'rmse',
+  grid_id = "grid",
+  decreasing = FALSE
+)
+data.frame(resultados_grid@summary_table)
+
+
+# Mejor modelo encontrado
+# ==============================================================================
+modelo_final <- h2o.getModel(resultados_grid@model_ids[[1]])
+
+
+
+#error del test
+
+predicciones1 <- h2o.predict(
+  object  = modelo_final,
+  newdata = datos_test 
+)
+
+
+
+predicciones1 <- predicciones1 %>%
+  as_tibble() %>%
+  mutate(valor_real = as.vector(datos_test$`798`))
+
+predicciones1
+
+modelo_final <- h2o.getModel(resultados_grid@model_ids[[2]])
+
+
+
+#error del test
+
+predicciones2 <- h2o.predict(
+  object  = modelo_final,
+  newdata = datos_test 
+)
+
+
+
+predicciones2 <- predicciones2 %>%
+  as_tibble() %>%
+  mutate(valor_real = as.vector(datos_test$`798`))
+predicciones2
+
+modelo_final <- h2o.getModel(resultados_grid@model_ids[[3]])
+
+
+
+#error del test
+
+predicciones3 <- h2o.predict(
+  object  = modelo_final,
+  newdata = datos_test 
+)
+
+
+
+predicciones3 <- predicciones3 %>%
+  as_tibble() %>%
+  mutate(valor_real = as.vector(datos_test$`798`))
+predicciones3
+
+modelos<-data.frame(resultados_grid@summary_table)
+
+datomodelo<-data.frame()
+datomodelo<-modelos[1,]
+datomodelo<-rbind(datomodelo,modelos[2,])
+datomodelo<-rbind(datomodelo,modelos[3,])
+
+prediccionesdatos<-data.frame()
+prediccionesdatos<-predicciones1
+prediccionesdatos<-rbind(prediccionesdatos,predicciones2)
+prediccionesdatos<-rbind(prediccionesdatos,predicciones3)
+
+
+datomodelo
+print(prediccionesdatos, n=30)
+
+todosdatosmodelo<-rbind(todosdatosmodelo,datomodelo)
+todosdatospredict<-rbind(todosdatospredict,prediccionesdatos)
+
+
+set.seed(123)
+split_inicial <- initial_split(
+  data   = espectros,
+  prop   = 0.8,
+  strata = `810`
+)
+
+datos_train <- training(split_inicial)
+datos_test  <- testing(split_inicial)
+
+summary(datos_train$`810`)
+summary(datos_test$`810`)
+
+
+h2o.init(
+  nthreads = -1,
+  max_mem_size = "4g"
+)
+h2o.removeAll()
+h2o.no_progress()
+
+
+#aplicar el pretratamiento de los datos
+transformer <- recipe(
+  formula = . ~ .,
+  data =  datos_train
+) %>%
+  update_role(c(concentration,method,time),new_role = "predictor") %>%
+  step_naomit(all_predictors()) %>%
+  step_nzv(all_predictors()) %>%
+  step_center(all_numeric(), -all_outcomes()) %>%
+  step_scale(all_numeric(), -all_outcomes()) %>%
+  step_dummy(all_nominal(), -all_outcomes())
+
+transformer
+
+# Se entrena el objeto recipe
+transformer_fit <- prep(transformer)
+
+# Se aplican las transformaciones al conjunto de entrenamiento y de test
+datos_train_prep <- bake(transformer_fit, new_data = datos_train)
+datos_test_prep  <- bake(transformer_fit, new_data = datos_test)
+
+glimpse(datos_train_prep)
+
+
+#trasnferir al cluster
+datos_train  <- as.h2o(datos_train_prep, key = "datos_train")
+datos_test   <- as.h2o(datos_test_prep, key = "datos_test")
+
+
+# Espacio de búsqueda de cada hiperparámetro
+# ==============================================================================
+hiperparametros <- list(
+  epochs = c(50, 100, 500,50000),
+  hidden = list(5, 10, 25, 50, c(10, 10),c(25,25,25),100)
+)
+
+
+
+# Búsqueda por validación cruzada
+# ==============================================================================
+variable_respuesta <- '810'
+predictores <- c("method_HP","method_P","time")
+
+grid <- h2o.grid(
+  algorithm    = "deeplearning",
+  activation   = "Rectifier",
+  x            = predictores,
+  y            = variable_respuesta,
+  training_frame  = datos_train,
+  nfolds       = 3, #validacion cruzada
+  standardize  = FALSE,
+  hyper_params = hiperparametros,
+  search_criteria = list(strategy = "Cartesian"),
+  seed         = 123,
+  grid_id      = "grid"
+)
+
+# Resultados del grid
+# ==============================================================================
+resultados_grid <- h2o.getGrid(
+  sort_by = 'rmse',
+  grid_id = "grid",
+  decreasing = FALSE
+)
+data.frame(resultados_grid@summary_table)
+
+
+# Mejor modelo encontrado
+# ==============================================================================
+modelo_final <- h2o.getModel(resultados_grid@model_ids[[1]])
+
+
+
+#error del test
+
+predicciones1 <- h2o.predict(
+  object  = modelo_final,
+  newdata = datos_test 
+)
+
+
+
+predicciones1 <- predicciones1 %>%
+  as_tibble() %>%
+  mutate(valor_real = as.vector(datos_test$`810`))
+
+predicciones1
+
+modelo_final <- h2o.getModel(resultados_grid@model_ids[[2]])
+
+
+
+#error del test
+
+predicciones2 <- h2o.predict(
+  object  = modelo_final,
+  newdata = datos_test 
+)
+
+
+
+predicciones2 <- predicciones2 %>%
+  as_tibble() %>%
+  mutate(valor_real = as.vector(datos_test$`810`))
+predicciones2
+
+modelo_final <- h2o.getModel(resultados_grid@model_ids[[3]])
+
+
+
+#error del test
+
+predicciones3 <- h2o.predict(
+  object  = modelo_final,
+  newdata = datos_test 
+)
+
+
+
+predicciones3 <- predicciones3 %>%
+  as_tibble() %>%
+  mutate(valor_real = as.vector(datos_test$`810`))
+predicciones3
+
+modelos<-data.frame(resultados_grid@summary_table)
+
+datomodelo<-data.frame()
+datomodelo<-modelos[1,]
+datomodelo<-rbind(datomodelo,modelos[2,])
+datomodelo<-rbind(datomodelo,modelos[3,])
+
+prediccionesdatos<-data.frame()
+prediccionesdatos<-predicciones1
+prediccionesdatos<-rbind(prediccionesdatos,predicciones2)
+prediccionesdatos<-rbind(prediccionesdatos,predicciones3)
+
+
+datomodelo
+print(prediccionesdatos, n=30)
+
+todosdatosmodelo<-rbind(todosdatosmodelo,datomodelo)
+todosdatospredict<-rbind(todosdatospredict,prediccionesdatos)
+
+
+set.seed(123)
+split_inicial <- initial_split(
+  data   = espectros,
+  prop   = 0.8,
+  strata = `813`
+)
+
+datos_train <- training(split_inicial)
+datos_test  <- testing(split_inicial)
+
+summary(datos_train$`813`)
+summary(datos_test$`813`)
+
+
+h2o.init(
+  nthreads = -1,
+  max_mem_size = "4g"
+)
+h2o.removeAll()
+h2o.no_progress()
+
+
+#aplicar el pretratamiento de los datos
+transformer <- recipe(
+  formula = . ~ .,
+  data =  datos_train
+) %>%
+  update_role(c(concentration,method,time),new_role = "predictor") %>%
+  step_naomit(all_predictors()) %>%
+  step_nzv(all_predictors()) %>%
+  step_center(all_numeric(), -all_outcomes()) %>%
+  step_scale(all_numeric(), -all_outcomes()) %>%
+  step_dummy(all_nominal(), -all_outcomes())
+
+transformer
+
+# Se entrena el objeto recipe
+transformer_fit <- prep(transformer)
+
+# Se aplican las transformaciones al conjunto de entrenamiento y de test
+datos_train_prep <- bake(transformer_fit, new_data = datos_train)
+datos_test_prep  <- bake(transformer_fit, new_data = datos_test)
+
+glimpse(datos_train_prep)
+
+
+#trasnferir al cluster
+datos_train  <- as.h2o(datos_train_prep, key = "datos_train")
+datos_test   <- as.h2o(datos_test_prep, key = "datos_test")
+
+
+# Espacio de búsqueda de cada hiperparámetro
+# ==============================================================================
+hiperparametros <- list(
+  epochs = c(50, 100, 500,50000),
+  hidden = list(5, 10, 25, 50, c(10, 10),c(25,25,25),100)
+)
+
+
+
+# Búsqueda por validación cruzada
+# ==============================================================================
+variable_respuesta <- '813'
+predictores <- c("method_HP","method_P","time")
+
+grid <- h2o.grid(
+  algorithm    = "deeplearning",
+  activation   = "Rectifier",
+  x            = predictores,
+  y            = variable_respuesta,
+  training_frame  = datos_train,
+  nfolds       = 3, #validacion cruzada
+  standardize  = FALSE,
+  hyper_params = hiperparametros,
+  search_criteria = list(strategy = "Cartesian"),
+  seed         = 123,
+  grid_id      = "grid"
+)
+
+# Resultados del grid
+# ==============================================================================
+resultados_grid <- h2o.getGrid(
+  sort_by = 'rmse',
+  grid_id = "grid",
+  decreasing = FALSE
+)
+data.frame(resultados_grid@summary_table)
+
+
+# Mejor modelo encontrado
+# ==============================================================================
+modelo_final <- h2o.getModel(resultados_grid@model_ids[[1]])
+
+
+
+#error del test
+
+predicciones1 <- h2o.predict(
+  object  = modelo_final,
+  newdata = datos_test 
+)
+
+
+
+predicciones1 <- predicciones1 %>%
+  as_tibble() %>%
+  mutate(valor_real = as.vector(datos_test$`813`))
+
+predicciones1
+
+modelo_final <- h2o.getModel(resultados_grid@model_ids[[2]])
+
+
+
+#error del test
+
+predicciones2 <- h2o.predict(
+  object  = modelo_final,
+  newdata = datos_test 
+)
+
+
+
+predicciones2 <- predicciones2 %>%
+  as_tibble() %>%
+  mutate(valor_real = as.vector(datos_test$`813`))
+predicciones2
+
+modelo_final <- h2o.getModel(resultados_grid@model_ids[[3]])
+
+
+
+#error del test
+
+predicciones3 <- h2o.predict(
+  object  = modelo_final,
+  newdata = datos_test 
+)
+
+
+
+predicciones3 <- predicciones3 %>%
+  as_tibble() %>%
+  mutate(valor_real = as.vector(datos_test$`813`))
+predicciones3
+
+modelos<-data.frame(resultados_grid@summary_table)
+
+datomodelo<-data.frame()
+datomodelo<-modelos[1,]
+datomodelo<-rbind(datomodelo,modelos[2,])
+datomodelo<-rbind(datomodelo,modelos[3,])
+
+prediccionesdatos<-data.frame()
+prediccionesdatos<-predicciones1
+prediccionesdatos<-rbind(prediccionesdatos,predicciones2)
+prediccionesdatos<-rbind(prediccionesdatos,predicciones3)
+
+
+datomodelo
+print(prediccionesdatos, n=30)
+
+todosdatosmodelo<-rbind(todosdatosmodelo,datomodelo)
+todosdatospredict<-rbind(todosdatospredict,prediccionesdatos)
+
+
+set.seed(123)
+split_inicial <- initial_split(
+  data   = espectros,
+  prop   = 0.8,
+  strata = `825`
+)
+
+datos_train <- training(split_inicial)
+datos_test  <- testing(split_inicial)
+
+summary(datos_train$`825`)
+summary(datos_test$`825`)
+
+
+h2o.init(
+  nthreads = -1,
+  max_mem_size = "4g"
+)
+h2o.removeAll()
+h2o.no_progress()
+
+
+#aplicar el pretratamiento de los datos
+transformer <- recipe(
+  formula = . ~ .,
+  data =  datos_train
+) %>%
+  update_role(c(concentration,method,time),new_role = "predictor") %>%
+  step_naomit(all_predictors()) %>%
+  step_nzv(all_predictors()) %>%
+  step_center(all_numeric(), -all_outcomes()) %>%
+  step_scale(all_numeric(), -all_outcomes()) %>%
+  step_dummy(all_nominal(), -all_outcomes())
+
+transformer
+
+# Se entrena el objeto recipe
+transformer_fit <- prep(transformer)
+
+# Se aplican las transformaciones al conjunto de entrenamiento y de test
+datos_train_prep <- bake(transformer_fit, new_data = datos_train)
+datos_test_prep  <- bake(transformer_fit, new_data = datos_test)
+
+glimpse(datos_train_prep)
+
+
+#trasnferir al cluster
+datos_train  <- as.h2o(datos_train_prep, key = "datos_train")
+datos_test   <- as.h2o(datos_test_prep, key = "datos_test")
+
+
+# Espacio de búsqueda de cada hiperparámetro
+# ==============================================================================
+hiperparametros <- list(
+  epochs = c(50, 100, 500,50000),
+  hidden = list(5, 10, 25, 50, c(10, 10),c(25,25,25),100)
+)
+
+
+
+# Búsqueda por validación cruzada
+# ==============================================================================
+variable_respuesta <- '825'
+predictores <- c("method_HP","method_P","time")
+
+grid <- h2o.grid(
+  algorithm    = "deeplearning",
+  activation   = "Rectifier",
+  x            = predictores,
+  y            = variable_respuesta,
+  training_frame  = datos_train,
+  nfolds       = 3, #validacion cruzada
+  standardize  = FALSE,
+  hyper_params = hiperparametros,
+  search_criteria = list(strategy = "Cartesian"),
+  seed         = 123,
+  grid_id      = "grid"
+)
+
+# Resultados del grid
+# ==============================================================================
+resultados_grid <- h2o.getGrid(
+  sort_by = 'rmse',
+  grid_id = "grid",
+  decreasing = FALSE
+)
+data.frame(resultados_grid@summary_table)
+
+
+# Mejor modelo encontrado
+# ==============================================================================
+modelo_final <- h2o.getModel(resultados_grid@model_ids[[1]])
+
+
+
+#error del test
+
+predicciones1 <- h2o.predict(
+  object  = modelo_final,
+  newdata = datos_test 
+)
+
+
+
+predicciones1 <- predicciones1 %>%
+  as_tibble() %>%
+  mutate(valor_real = as.vector(datos_test$`825`))
+
+predicciones1
+
+modelo_final <- h2o.getModel(resultados_grid@model_ids[[2]])
+
+
+
+#error del test
+
+predicciones2 <- h2o.predict(
+  object  = modelo_final,
+  newdata = datos_test 
+)
+
+
+
+predicciones2 <- predicciones2 %>%
+  as_tibble() %>%
+  mutate(valor_real = as.vector(datos_test$`825`))
+predicciones2
+
+modelo_final <- h2o.getModel(resultados_grid@model_ids[[3]])
+
+
+
+#error del test
+
+predicciones3 <- h2o.predict(
+  object  = modelo_final,
+  newdata = datos_test 
+)
+
+
+
+predicciones3 <- predicciones3 %>%
+  as_tibble() %>%
+  mutate(valor_real = as.vector(datos_test$`825`))
+predicciones3
+
+modelos<-data.frame(resultados_grid@summary_table)
+
+datomodelo<-data.frame()
+datomodelo<-modelos[1,]
+datomodelo<-rbind(datomodelo,modelos[2,])
+datomodelo<-rbind(datomodelo,modelos[3,])
+
+prediccionesdatos<-data.frame()
+prediccionesdatos<-predicciones1
+prediccionesdatos<-rbind(prediccionesdatos,predicciones2)
+prediccionesdatos<-rbind(prediccionesdatos,predicciones3)
+
+
+datomodelo
+print(prediccionesdatos, n=30)
+
+todosdatosmodelo<-rbind(todosdatosmodelo,datomodelo)
+todosdatospredict<-rbind(todosdatospredict,prediccionesdatos)
+
+
+
+set.seed(123)
+split_inicial <- initial_split(
+  data   = espectros,
+  prop   = 0.8,
+  strata = `842`
+)
+
+datos_train <- training(split_inicial)
+datos_test  <- testing(split_inicial)
+
+summary(datos_train$`842`)
+summary(datos_test$`842`)
+
+
+h2o.init(
+  nthreads = -1,
+  max_mem_size = "4g"
+)
+h2o.removeAll()
+h2o.no_progress()
+
+
+#aplicar el pretratamiento de los datos
+transformer <- recipe(
+  formula = . ~ .,
+  data =  datos_train
+) %>%
+  update_role(c(concentration,method,time),new_role = "predictor") %>%
+  step_naomit(all_predictors()) %>%
+  step_nzv(all_predictors()) %>%
+  step_center(all_numeric(), -all_outcomes()) %>%
+  step_scale(all_numeric(), -all_outcomes()) %>%
+  step_dummy(all_nominal(), -all_outcomes())
+
+transformer
+
+# Se entrena el objeto recipe
+transformer_fit <- prep(transformer)
+
+# Se aplican las transformaciones al conjunto de entrenamiento y de test
+datos_train_prep <- bake(transformer_fit, new_data = datos_train)
+datos_test_prep  <- bake(transformer_fit, new_data = datos_test)
+
+glimpse(datos_train_prep)
+
+
+#trasnferir al cluster
+datos_train  <- as.h2o(datos_train_prep, key = "datos_train")
+datos_test   <- as.h2o(datos_test_prep, key = "datos_test")
+
+
+# Espacio de búsqueda de cada hiperparámetro
+# ==============================================================================
+hiperparametros <- list(
+  epochs = c(50, 100, 500,50000),
+  hidden = list(5, 10, 25, 50, c(10, 10),c(25,25,25),100)
+)
+
+
+
+# Búsqueda por validación cruzada
+# ==============================================================================
+variable_respuesta <- '842'
+predictores <- c("method_HP","method_P","time")
+
+grid <- h2o.grid(
+  algorithm    = "deeplearning",
+  activation   = "Rectifier",
+  x            = predictores,
+  y            = variable_respuesta,
+  training_frame  = datos_train,
+  nfolds       = 3, #validacion cruzada
+  standardize  = FALSE,
+  hyper_params = hiperparametros,
+  search_criteria = list(strategy = "Cartesian"),
+  seed         = 123,
+  grid_id      = "grid"
+)
+
+# Resultados del grid
+# ==============================================================================
+resultados_grid <- h2o.getGrid(
+  sort_by = 'rmse',
+  grid_id = "grid",
+  decreasing = FALSE
+)
+data.frame(resultados_grid@summary_table)
+
+
+# Mejor modelo encontrado
+# ==============================================================================
+modelo_final <- h2o.getModel(resultados_grid@model_ids[[1]])
+
+
+
+#error del test
+
+predicciones1 <- h2o.predict(
+  object  = modelo_final,
+  newdata = datos_test 
+)
+
+
+
+predicciones1 <- predicciones1 %>%
+  as_tibble() %>%
+  mutate(valor_real = as.vector(datos_test$`842`))
+
+predicciones1
+
+modelo_final <- h2o.getModel(resultados_grid@model_ids[[2]])
+
+
+
+#error del test
+
+predicciones2 <- h2o.predict(
+  object  = modelo_final,
+  newdata = datos_test 
+)
+
+
+
+predicciones2 <- predicciones2 %>%
+  as_tibble() %>%
+  mutate(valor_real = as.vector(datos_test$`842`))
+predicciones2
+
+modelo_final <- h2o.getModel(resultados_grid@model_ids[[3]])
+
+
+
+#error del test
+
+predicciones3 <- h2o.predict(
+  object  = modelo_final,
+  newdata = datos_test 
+)
+
+
+
+predicciones3 <- predicciones3 %>%
+  as_tibble() %>%
+  mutate(valor_real = as.vector(datos_test$`842`))
+predicciones3
+
+modelos<-data.frame(resultados_grid@summary_table)
+
+datomodelo<-data.frame()
+datomodelo<-modelos[1,]
+datomodelo<-rbind(datomodelo,modelos[2,])
+datomodelo<-rbind(datomodelo,modelos[3,])
+
+prediccionesdatos<-data.frame()
+prediccionesdatos<-predicciones1
+prediccionesdatos<-rbind(prediccionesdatos,predicciones2)
+prediccionesdatos<-rbind(prediccionesdatos,predicciones3)
+
+
+datomodelo
+print(prediccionesdatos, n=30)
+
+todosdatosmodelo<-rbind(todosdatosmodelo,datomodelo)
+todosdatospredict<-rbind(todosdatospredict,prediccionesdatos)
+
+
+set.seed(123)
+split_inicial <- initial_split(
+  data   = espectros,
+  prop   = 0.8,
+  strata = `893`
+)
+
+datos_train <- training(split_inicial)
+datos_test  <- testing(split_inicial)
+
+summary(datos_train$`893`)
+summary(datos_test$`893`)
+
+
+h2o.init(
+  nthreads = -1,
+  max_mem_size = "4g"
+)
+h2o.removeAll()
+h2o.no_progress()
+
+
+#aplicar el pretratamiento de los datos
+transformer <- recipe(
+  formula = . ~ .,
+  data =  datos_train
+) %>%
+  update_role(c(concentration,method,time),new_role = "predictor") %>%
+  step_naomit(all_predictors()) %>%
+  step_nzv(all_predictors()) %>%
+  step_center(all_numeric(), -all_outcomes()) %>%
+  step_scale(all_numeric(), -all_outcomes()) %>%
+  step_dummy(all_nominal(), -all_outcomes())
+
+transformer
+
+# Se entrena el objeto recipe
+transformer_fit <- prep(transformer)
+
+# Se aplican las transformaciones al conjunto de entrenamiento y de test
+datos_train_prep <- bake(transformer_fit, new_data = datos_train)
+datos_test_prep  <- bake(transformer_fit, new_data = datos_test)
+
+glimpse(datos_train_prep)
+
+
+#trasnferir al cluster
+datos_train  <- as.h2o(datos_train_prep, key = "datos_train")
+datos_test   <- as.h2o(datos_test_prep, key = "datos_test")
+
+
+# Espacio de búsqueda de cada hiperparámetro
+# ==============================================================================
+hiperparametros <- list(
+  epochs = c(50, 100, 500,50000),
+  hidden = list(5, 10, 25, 50, c(10, 10),c(25,25,25),100)
+)
+
+
+
+# Búsqueda por validación cruzada
+# ==============================================================================
+variable_respuesta <- '893'
+predictores <- c("method_HP","method_P","time")
+
+grid <- h2o.grid(
+  algorithm    = "deeplearning",
+  activation   = "Rectifier",
+  x            = predictores,
+  y            = variable_respuesta,
+  training_frame  = datos_train,
+  nfolds       = 3, #validacion cruzada
+  standardize  = FALSE,
+  hyper_params = hiperparametros,
+  search_criteria = list(strategy = "Cartesian"),
+  seed         = 123,
+  grid_id      = "grid"
+)
+
+# Resultados del grid
+# ==============================================================================
+resultados_grid <- h2o.getGrid(
+  sort_by = 'rmse',
+  grid_id = "grid",
+  decreasing = FALSE
+)
+data.frame(resultados_grid@summary_table)
+
+
+# Mejor modelo encontrado
+# ==============================================================================
+modelo_final <- h2o.getModel(resultados_grid@model_ids[[1]])
+
+
+
+#error del test
+
+predicciones1 <- h2o.predict(
+  object  = modelo_final,
+  newdata = datos_test 
+)
+
+
+
+predicciones1 <- predicciones1 %>%
+  as_tibble() %>%
+  mutate(valor_real = as.vector(datos_test$`893`))
+
+predicciones1
+
+modelo_final <- h2o.getModel(resultados_grid@model_ids[[2]])
+
+
+
+#error del test
+
+predicciones2 <- h2o.predict(
+  object  = modelo_final,
+  newdata = datos_test 
+)
+
+
+
+predicciones2 <- predicciones2 %>%
+  as_tibble() %>%
+  mutate(valor_real = as.vector(datos_test$`893`))
+predicciones2
+
+modelo_final <- h2o.getModel(resultados_grid@model_ids[[3]])
+
+
+
+#error del test
+
+predicciones3 <- h2o.predict(
+  object  = modelo_final,
+  newdata = datos_test 
+)
+
+
+
+predicciones3 <- predicciones3 %>%
+  as_tibble() %>%
+  mutate(valor_real = as.vector(datos_test$`893`))
+predicciones3
+
+modelos<-data.frame(resultados_grid@summary_table)
+
+datomodelo<-data.frame()
+datomodelo<-modelos[1,]
+datomodelo<-rbind(datomodelo,modelos[2,])
+datomodelo<-rbind(datomodelo,modelos[3,])
+
+prediccionesdatos<-data.frame()
+prediccionesdatos<-predicciones1
+prediccionesdatos<-rbind(prediccionesdatos,predicciones2)
+prediccionesdatos<-rbind(prediccionesdatos,predicciones3)
+
+
+datomodelo
+print(prediccionesdatos, n=30)
+
+todosdatosmodelo<-rbind(todosdatosmodelo,datomodelo)
+todosdatospredict<-rbind(todosdatospredict,prediccionesdatos)
+
+
+set.seed(123)
+split_inicial <- initial_split(
+  data   = espectros,
+  prop   = 0.8,
+  strata = `978`
+)
+
+datos_train <- training(split_inicial)
+datos_test  <- testing(split_inicial)
+
+summary(datos_train$`978`)
+summary(datos_test$`978`)
+
+
+h2o.init(
+  nthreads = -1,
+  max_mem_size = "4g"
+)
+h2o.removeAll()
+h2o.no_progress()
+
+
+#aplicar el pretratamiento de los datos
+transformer <- recipe(
+  formula = . ~ .,
+  data =  datos_train
+) %>%
+  update_role(c(concentration,method,time),new_role = "predictor") %>%
+  step_naomit(all_predictors()) %>%
+  step_nzv(all_predictors()) %>%
+  step_center(all_numeric(), -all_outcomes()) %>%
+  step_scale(all_numeric(), -all_outcomes()) %>%
+  step_dummy(all_nominal(), -all_outcomes())
+
+transformer
+
+# Se entrena el objeto recipe
+transformer_fit <- prep(transformer)
+
+# Se aplican las transformaciones al conjunto de entrenamiento y de test
+datos_train_prep <- bake(transformer_fit, new_data = datos_train)
+datos_test_prep  <- bake(transformer_fit, new_data = datos_test)
+
+glimpse(datos_train_prep)
+
+
+#trasnferir al cluster
+datos_train  <- as.h2o(datos_train_prep, key = "datos_train")
+datos_test   <- as.h2o(datos_test_prep, key = "datos_test")
+
+
+# Espacio de búsqueda de cada hiperparámetro
+# ==============================================================================
+hiperparametros <- list(
+  epochs = c(50, 100, 500,50000),
+  hidden = list(5, 10, 25, 50, c(10, 10),c(25,25,25),100)
+)
+
+
+
+# Búsqueda por validación cruzada
+# ==============================================================================
+variable_respuesta <- '978'
+predictores <- c("method_HP","method_P","time")
+
+grid <- h2o.grid(
+  algorithm    = "deeplearning",
+  activation   = "Rectifier",
+  x            = predictores,
+  y            = variable_respuesta,
+  training_frame  = datos_train,
+  nfolds       = 3, #validacion cruzada
+  standardize  = FALSE,
+  hyper_params = hiperparametros,
+  search_criteria = list(strategy = "Cartesian"),
+  seed         = 123,
+  grid_id      = "grid"
+)
+
+# Resultados del grid
+# ==============================================================================
+resultados_grid <- h2o.getGrid(
+  sort_by = 'rmse',
+  grid_id = "grid",
+  decreasing = FALSE
+)
+data.frame(resultados_grid@summary_table)
+
+
+# Mejor modelo encontrado
+# ==============================================================================
+modelo_final <- h2o.getModel(resultados_grid@model_ids[[1]])
+
+
+
+#error del test
+
+predicciones1 <- h2o.predict(
+  object  = modelo_final,
+  newdata = datos_test 
+)
+
+
+
+predicciones1 <- predicciones1 %>%
+  as_tibble() %>%
+  mutate(valor_real = as.vector(datos_test$`978`))
+
+predicciones1
+
+modelo_final <- h2o.getModel(resultados_grid@model_ids[[2]])
+
+
+
+#error del test
+
+predicciones2 <- h2o.predict(
+  object  = modelo_final,
+  newdata = datos_test 
+)
+
+
+
+predicciones2 <- predicciones2 %>%
+  as_tibble() %>%
+  mutate(valor_real = as.vector(datos_test$`978`))
+predicciones2
+
+modelo_final <- h2o.getModel(resultados_grid@model_ids[[3]])
+
+
+
+#error del test
+
+predicciones3 <- h2o.predict(
+  object  = modelo_final,
+  newdata = datos_test 
+)
+
+
+
+predicciones3 <- predicciones3 %>%
+  as_tibble() %>%
+  mutate(valor_real = as.vector(datos_test$`978`))
+predicciones3
+
+modelos<-data.frame(resultados_grid@summary_table)
+
+datomodelo<-data.frame()
+datomodelo<-modelos[1,]
+datomodelo<-rbind(datomodelo,modelos[2,])
+datomodelo<-rbind(datomodelo,modelos[3,])
+
+prediccionesdatos<-data.frame()
+prediccionesdatos<-predicciones1
+prediccionesdatos<-rbind(prediccionesdatos,predicciones2)
+prediccionesdatos<-rbind(prediccionesdatos,predicciones3)
+
+
+datomodelo
+print(prediccionesdatos, n=30)
+
+todosdatosmodelo<-rbind(todosdatosmodelo,datomodelo)
+todosdatospredict<-rbind(todosdatospredict,prediccionesdatos)
+
+
+set.seed(123)
+split_inicial <- initial_split(
+  data   = espectros,
+  prop   = 0.8,
+  strata = `981`
+)
+
+datos_train <- training(split_inicial)
+datos_test  <- testing(split_inicial)
+
+summary(datos_train$`981`)
+summary(datos_test$`981`)
+
+
+h2o.init(
+  nthreads = -1,
+  max_mem_size = "4g"
+)
+h2o.removeAll()
+h2o.no_progress()
+
+
+#aplicar el pretratamiento de los datos
+transformer <- recipe(
+  formula = . ~ .,
+  data =  datos_train
+) %>%
+  update_role(c(concentration,method,time),new_role = "predictor") %>%
+  step_naomit(all_predictors()) %>%
+  step_nzv(all_predictors()) %>%
+  step_center(all_numeric(), -all_outcomes()) %>%
+  step_scale(all_numeric(), -all_outcomes()) %>%
+  step_dummy(all_nominal(), -all_outcomes())
+
+transformer
+
+# Se entrena el objeto recipe
+transformer_fit <- prep(transformer)
+
+# Se aplican las transformaciones al conjunto de entrenamiento y de test
+datos_train_prep <- bake(transformer_fit, new_data = datos_train)
+datos_test_prep  <- bake(transformer_fit, new_data = datos_test)
+
+glimpse(datos_train_prep)
+
+
+#trasnferir al cluster
+datos_train  <- as.h2o(datos_train_prep, key = "datos_train")
+datos_test   <- as.h2o(datos_test_prep, key = "datos_test")
+
+
+# Espacio de búsqueda de cada hiperparámetro
+# ==============================================================================
+hiperparametros <- list(
+  epochs = c(50, 100, 500,50000),
+  hidden = list(5, 10, 25, 50, c(10, 10),c(25,25,25),100)
+)
+
+
+
+# Búsqueda por validación cruzada
+# ==============================================================================
+variable_respuesta <- '981'
+predictores <- c("method_HP","method_P","time")
+
+grid <- h2o.grid(
+  algorithm    = "deeplearning",
+  activation   = "Rectifier",
+  x            = predictores,
+  y            = variable_respuesta,
+  training_frame  = datos_train,
+  nfolds       = 3, #validacion cruzada
+  standardize  = FALSE,
+  hyper_params = hiperparametros,
+  search_criteria = list(strategy = "Cartesian"),
+  seed         = 123,
+  grid_id      = "grid"
+)
+
+# Resultados del grid
+# ==============================================================================
+resultados_grid <- h2o.getGrid(
+  sort_by = 'rmse',
+  grid_id = "grid",
+  decreasing = FALSE
+)
+data.frame(resultados_grid@summary_table)
+
+
+# Mejor modelo encontrado
+# ==============================================================================
+modelo_final <- h2o.getModel(resultados_grid@model_ids[[1]])
+
+
+
+#error del test
+
+predicciones1 <- h2o.predict(
+  object  = modelo_final,
+  newdata = datos_test 
+)
+
+
+
+predicciones1 <- predicciones1 %>%
+  as_tibble() %>%
+  mutate(valor_real = as.vector(datos_test$`981`))
+
+predicciones1
+
+modelo_final <- h2o.getModel(resultados_grid@model_ids[[2]])
+
+
+
+#error del test
+
+predicciones2 <- h2o.predict(
+  object  = modelo_final,
+  newdata = datos_test 
+)
+
+
+
+predicciones2 <- predicciones2 %>%
+  as_tibble() %>%
+  mutate(valor_real = as.vector(datos_test$`981`))
+predicciones2
+
+modelo_final <- h2o.getModel(resultados_grid@model_ids[[3]])
+
+
+
+#error del test
+
+predicciones3 <- h2o.predict(
+  object  = modelo_final,
+  newdata = datos_test 
+)
+
+
+
+predicciones3 <- predicciones3 %>%
+  as_tibble() %>%
+  mutate(valor_real = as.vector(datos_test$`981`))
+predicciones3
+
+modelos<-data.frame(resultados_grid@summary_table)
+
+datomodelo<-data.frame()
+datomodelo<-modelos[1,]
+datomodelo<-rbind(datomodelo,modelos[2,])
+datomodelo<-rbind(datomodelo,modelos[3,])
+
+prediccionesdatos<-data.frame()
+prediccionesdatos<-predicciones1
+prediccionesdatos<-rbind(prediccionesdatos,predicciones2)
+prediccionesdatos<-rbind(prediccionesdatos,predicciones3)
+
+
+datomodelo
+print(prediccionesdatos, n=30)
+
+todosdatosmodelo<-rbind(todosdatosmodelo,datomodelo)
+todosdatospredict<-rbind(todosdatospredict,prediccionesdatos)
+
+
+set.seed(123)
+split_inicial <- initial_split(
+  data   = espectros,
+  prop   = 0.8,
+  strata = `988`
+)
+
+datos_train <- training(split_inicial)
+datos_test  <- testing(split_inicial)
+
+summary(datos_train$`988`)
+summary(datos_test$`988`)
+
+
+h2o.init(
+  nthreads = -1,
+  max_mem_size = "4g"
+)
+h2o.removeAll()
+h2o.no_progress()
+
+
+#aplicar el pretratamiento de los datos
+transformer <- recipe(
+  formula = . ~ .,
+  data =  datos_train
+) %>%
+  update_role(c(concentration,method,time),new_role = "predictor") %>%
+  step_naomit(all_predictors()) %>%
+  step_nzv(all_predictors()) %>%
+  step_center(all_numeric(), -all_outcomes()) %>%
+  step_scale(all_numeric(), -all_outcomes()) %>%
+  step_dummy(all_nominal(), -all_outcomes())
+
+transformer
+
+# Se entrena el objeto recipe
+transformer_fit <- prep(transformer)
+
+# Se aplican las transformaciones al conjunto de entrenamiento y de test
+datos_train_prep <- bake(transformer_fit, new_data = datos_train)
+datos_test_prep  <- bake(transformer_fit, new_data = datos_test)
+
+glimpse(datos_train_prep)
+
+
+#trasnferir al cluster
+datos_train  <- as.h2o(datos_train_prep, key = "datos_train")
+datos_test   <- as.h2o(datos_test_prep, key = "datos_test")
+
+
+# Espacio de búsqueda de cada hiperparámetro
+# ==============================================================================
+hiperparametros <- list(
+  epochs = c(50, 100, 500,50000),
+  hidden = list(5, 10, 25, 50, c(10, 10),c(25,25,25),100)
+)
+
+
+
+# Búsqueda por validación cruzada
+# ==============================================================================
+variable_respuesta <- '988'
+predictores <- c("method_HP","method_P","time")
+
+grid <- h2o.grid(
+  algorithm    = "deeplearning",
+  activation   = "Rectifier",
+  x            = predictores,
+  y            = variable_respuesta,
+  training_frame  = datos_train,
+  nfolds       = 3, #validacion cruzada
+  standardize  = FALSE,
+  hyper_params = hiperparametros,
+  search_criteria = list(strategy = "Cartesian"),
+  seed         = 123,
+  grid_id      = "grid"
+)
+
+# Resultados del grid
+# ==============================================================================
+resultados_grid <- h2o.getGrid(
+  sort_by = 'rmse',
+  grid_id = "grid",
+  decreasing = FALSE
+)
+data.frame(resultados_grid@summary_table)
+
+
+# Mejor modelo encontrado
+# ==============================================================================
+modelo_final <- h2o.getModel(resultados_grid@model_ids[[1]])
+
+
+
+#error del test
+
+predicciones1 <- h2o.predict(
+  object  = modelo_final,
+  newdata = datos_test 
+)
+
+
+
+predicciones1 <- predicciones1 %>%
+  as_tibble() %>%
+  mutate(valor_real = as.vector(datos_test$`988`))
+
+predicciones1
+
+modelo_final <- h2o.getModel(resultados_grid@model_ids[[2]])
+
+
+
+#error del test
+
+predicciones2 <- h2o.predict(
+  object  = modelo_final,
+  newdata = datos_test 
+)
+
+
+
+predicciones2 <- predicciones2 %>%
+  as_tibble() %>%
+  mutate(valor_real = as.vector(datos_test$`988`))
+predicciones2
+
+modelo_final <- h2o.getModel(resultados_grid@model_ids[[3]])
+
+
+
+#error del test
+
+predicciones3 <- h2o.predict(
+  object  = modelo_final,
+  newdata = datos_test 
+)
+
+
+
+predicciones3 <- predicciones3 %>%
+  as_tibble() %>%
+  mutate(valor_real = as.vector(datos_test$`988`))
+predicciones3
+
+modelos<-data.frame(resultados_grid@summary_table)
+
+datomodelo<-data.frame()
+datomodelo<-modelos[1,]
+datomodelo<-rbind(datomodelo,modelos[2,])
+datomodelo<-rbind(datomodelo,modelos[3,])
+
+prediccionesdatos<-data.frame()
+prediccionesdatos<-predicciones1
+prediccionesdatos<-rbind(prediccionesdatos,predicciones2)
+prediccionesdatos<-rbind(prediccionesdatos,predicciones3)
+
+
+datomodelo
+print(prediccionesdatos, n=30)
+
+todosdatosmodelo<-rbind(todosdatosmodelo,datomodelo)
+todosdatospredict<-rbind(todosdatospredict,prediccionesdatos)
+
+
+set.seed(123)
+split_inicial <- initial_split(
+  data   = espectros,
+  prop   = 0.8,
+  strata = `991`
+)
+
+datos_train <- training(split_inicial)
+datos_test  <- testing(split_inicial)
+
+summary(datos_train$`991`)
+summary(datos_test$`991`)
+
+
+h2o.init(
+  nthreads = -1,
+  max_mem_size = "4g"
+)
+h2o.removeAll()
+h2o.no_progress()
+
+
+#aplicar el pretratamiento de los datos
+transformer <- recipe(
+  formula = . ~ .,
+  data =  datos_train
+) %>%
+  update_role(c(concentration,method,time),new_role = "predictor") %>%
+  step_naomit(all_predictors()) %>%
+  step_nzv(all_predictors()) %>%
+  step_center(all_numeric(), -all_outcomes()) %>%
+  step_scale(all_numeric(), -all_outcomes()) %>%
+  step_dummy(all_nominal(), -all_outcomes())
+
+transformer
+
+# Se entrena el objeto recipe
+transformer_fit <- prep(transformer)
+
+# Se aplican las transformaciones al conjunto de entrenamiento y de test
+datos_train_prep <- bake(transformer_fit, new_data = datos_train)
+datos_test_prep  <- bake(transformer_fit, new_data = datos_test)
+
+glimpse(datos_train_prep)
+
+
+#trasnferir al cluster
+datos_train  <- as.h2o(datos_train_prep, key = "datos_train")
+datos_test   <- as.h2o(datos_test_prep, key = "datos_test")
+
+
+# Espacio de búsqueda de cada hiperparámetro
+# ==============================================================================
+hiperparametros <- list(
+  epochs = c(50, 100, 500,50000),
+  hidden = list(5, 10, 25, 50, c(10, 10),c(25,25,25),100)
+)
+
+
+
+# Búsqueda por validación cruzada
+# ==============================================================================
+variable_respuesta <- '991'
+predictores <- c("method_HP","method_P","time")
+
+grid <- h2o.grid(
+  algorithm    = "deeplearning",
+  activation   = "Rectifier",
+  x            = predictores,
+  y            = variable_respuesta,
+  training_frame  = datos_train,
+  nfolds       = 3, #validacion cruzada
+  standardize  = FALSE,
+  hyper_params = hiperparametros,
+  search_criteria = list(strategy = "Cartesian"),
+  seed         = 123,
+  grid_id      = "grid"
+)
+
+# Resultados del grid
+# ==============================================================================
+resultados_grid <- h2o.getGrid(
+  sort_by = 'rmse',
+  grid_id = "grid",
+  decreasing = FALSE
+)
+data.frame(resultados_grid@summary_table)
+
+
+# Mejor modelo encontrado
+# ==============================================================================
+modelo_final <- h2o.getModel(resultados_grid@model_ids[[1]])
+
+
+
+#error del test
+
+predicciones1 <- h2o.predict(
+  object  = modelo_final,
+  newdata = datos_test 
+)
+
+
+
+predicciones1 <- predicciones1 %>%
+  as_tibble() %>%
+  mutate(valor_real = as.vector(datos_test$`991`))
+
+predicciones1
+
+modelo_final <- h2o.getModel(resultados_grid@model_ids[[2]])
+
+
+
+#error del test
+
+predicciones2 <- h2o.predict(
+  object  = modelo_final,
+  newdata = datos_test 
+)
+
+
+
+predicciones2 <- predicciones2 %>%
+  as_tibble() %>%
+  mutate(valor_real = as.vector(datos_test$`991`))
+predicciones2
+
+modelo_final <- h2o.getModel(resultados_grid@model_ids[[3]])
+
+
+
+#error del test
+
+predicciones3 <- h2o.predict(
+  object  = modelo_final,
+  newdata = datos_test 
+)
+
+
+
+predicciones3 <- predicciones3 %>%
+  as_tibble() %>%
+  mutate(valor_real = as.vector(datos_test$`991`))
+predicciones3
+
+modelos<-data.frame(resultados_grid@summary_table)
+
+datomodelo<-data.frame()
+datomodelo<-modelos[1,]
+datomodelo<-rbind(datomodelo,modelos[2,])
+datomodelo<-rbind(datomodelo,modelos[3,])
+
+prediccionesdatos<-data.frame()
+prediccionesdatos<-predicciones1
+prediccionesdatos<-rbind(prediccionesdatos,predicciones2)
+prediccionesdatos<-rbind(prediccionesdatos,predicciones3)
+
+
+datomodelo
+print(prediccionesdatos, n=30)
+
+todosdatosmodelo<-rbind(todosdatosmodelo,datomodelo)
+todosdatospredict<-rbind(todosdatospredict,prediccionesdatos)
+
+
+set.seed(123)
+split_inicial <- initial_split(
+  data   = espectros,
+  prop   = 0.8,
+  strata = `1031`
+)
+
+datos_train <- training(split_inicial)
+datos_test  <- testing(split_inicial)
+
+summary(datos_train$`1031`)
+summary(datos_test$`1031`)
+
+
+h2o.init(
+  nthreads = -1,
+  max_mem_size = "4g"
+)
+h2o.removeAll()
+h2o.no_progress()
+
+
+#aplicar el pretratamiento de los datos
+transformer <- recipe(
+  formula = . ~ .,
+  data =  datos_train
+) %>%
+  update_role(c(concentration,method,time),new_role = "predictor") %>%
+  step_naomit(all_predictors()) %>%
+  step_nzv(all_predictors()) %>%
+  step_center(all_numeric(), -all_outcomes()) %>%
+  step_scale(all_numeric(), -all_outcomes()) %>%
+  step_dummy(all_nominal(), -all_outcomes())
+
+transformer
+
+# Se entrena el objeto recipe
+transformer_fit <- prep(transformer)
+
+# Se aplican las transformaciones al conjunto de entrenamiento y de test
+datos_train_prep <- bake(transformer_fit, new_data = datos_train)
+datos_test_prep  <- bake(transformer_fit, new_data = datos_test)
+
+glimpse(datos_train_prep)
+
+
+#trasnferir al cluster
+datos_train  <- as.h2o(datos_train_prep, key = "datos_train")
+datos_test   <- as.h2o(datos_test_prep, key = "datos_test")
+
+
+# Espacio de búsqueda de cada hiperparámetro
+# ==============================================================================
+hiperparametros <- list(
+  epochs = c(50, 100, 500,50000),
+  hidden = list(5, 10, 25, 50, c(10, 10),c(25,25,25),100)
+)
+
+
+
+# Búsqueda por validación cruzada
+# ==============================================================================
+variable_respuesta <- '1031'
+predictores <- c("method_HP","method_P","time")
+
+grid <- h2o.grid(
+  algorithm    = "deeplearning",
+  activation   = "Rectifier",
+  x            = predictores,
+  y            = variable_respuesta,
+  training_frame  = datos_train,
+  nfolds       = 3, #validacion cruzada
+  standardize  = FALSE,
+  hyper_params = hiperparametros,
+  search_criteria = list(strategy = "Cartesian"),
+  seed         = 123,
+  grid_id      = "grid"
+)
+
+# Resultados del grid
+# ==============================================================================
+resultados_grid <- h2o.getGrid(
+  sort_by = 'rmse',
+  grid_id = "grid",
+  decreasing = FALSE
+)
+data.frame(resultados_grid@summary_table)
+
+
+# Mejor modelo encontrado
+# ==============================================================================
+modelo_final <- h2o.getModel(resultados_grid@model_ids[[1]])
+
+
+
+#error del test
+
+predicciones1 <- h2o.predict(
+  object  = modelo_final,
+  newdata = datos_test 
+)
+
+
+
+predicciones1 <- predicciones1 %>%
+  as_tibble() %>%
+  mutate(valor_real = as.vector(datos_test$`1031`))
+
+predicciones1
+
+modelo_final <- h2o.getModel(resultados_grid@model_ids[[2]])
+
+
+
+#error del test
+
+predicciones2 <- h2o.predict(
+  object  = modelo_final,
+  newdata = datos_test 
+)
+
+
+
+predicciones2 <- predicciones2 %>%
+  as_tibble() %>%
+  mutate(valor_real = as.vector(datos_test$`1031`))
+predicciones2
+
+modelo_final <- h2o.getModel(resultados_grid@model_ids[[3]])
+
+
+
+#error del test
+
+predicciones3 <- h2o.predict(
+  object  = modelo_final,
+  newdata = datos_test 
+)
+
+
+
+predicciones3 <- predicciones3 %>%
+  as_tibble() %>%
+  mutate(valor_real = as.vector(datos_test$`1031`))
+predicciones3
+
+modelos<-data.frame(resultados_grid@summary_table)
+
+datomodelo<-data.frame()
+datomodelo<-modelos[1,]
+datomodelo<-rbind(datomodelo,modelos[2,])
+datomodelo<-rbind(datomodelo,modelos[3,])
+
+prediccionesdatos<-data.frame()
+prediccionesdatos<-predicciones1
+prediccionesdatos<-rbind(prediccionesdatos,predicciones2)
+prediccionesdatos<-rbind(prediccionesdatos,predicciones3)
+
+
+datomodelo
+print(prediccionesdatos, n=30)
+
+todosdatosmodelo<-rbind(todosdatosmodelo,datomodelo)
+todosdatospredict<-rbind(todosdatospredict,prediccionesdatos)
+
+
+set.seed(123)
+split_inicial <- initial_split(
+  data   = espectros,
+  prop   = 0.8,
+  strata = `1065`
+)
+
+datos_train <- training(split_inicial)
+datos_test  <- testing(split_inicial)
+
+summary(datos_train$`1065`)
+summary(datos_test$`1065`)
+
+
+h2o.init(
+  nthreads = -1,
+  max_mem_size = "4g"
+)
+h2o.removeAll()
+h2o.no_progress()
+
+
+#aplicar el pretratamiento de los datos
+transformer <- recipe(
+  formula = . ~ .,
+  data =  datos_train
+) %>%
+  update_role(c(concentration,method,time),new_role = "predictor") %>%
+  step_naomit(all_predictors()) %>%
+  step_nzv(all_predictors()) %>%
+  step_center(all_numeric(), -all_outcomes()) %>%
+  step_scale(all_numeric(), -all_outcomes()) %>%
+  step_dummy(all_nominal(), -all_outcomes())
+
+transformer
+
+# Se entrena el objeto recipe
+transformer_fit <- prep(transformer)
+
+# Se aplican las transformaciones al conjunto de entrenamiento y de test
+datos_train_prep <- bake(transformer_fit, new_data = datos_train)
+datos_test_prep  <- bake(transformer_fit, new_data = datos_test)
+
+glimpse(datos_train_prep)
+
+
+#trasnferir al cluster
+datos_train  <- as.h2o(datos_train_prep, key = "datos_train")
+datos_test   <- as.h2o(datos_test_prep, key = "datos_test")
+
+
+# Espacio de búsqueda de cada hiperparámetro
+# ==============================================================================
+hiperparametros <- list(
+  epochs = c(50, 100, 500,50000),
+  hidden = list(5, 10, 25, 50, c(10, 10),c(25,25,25),100)
+)
+
+
+
+# Búsqueda por validación cruzada
+# ==============================================================================
+variable_respuesta <- '1065'
+predictores <- c("method_HP","method_P","time")
+
+grid <- h2o.grid(
+  algorithm    = "deeplearning",
+  activation   = "Rectifier",
+  x            = predictores,
+  y            = variable_respuesta,
+  training_frame  = datos_train,
+  nfolds       = 3, #validacion cruzada
+  standardize  = FALSE,
+  hyper_params = hiperparametros,
+  search_criteria = list(strategy = "Cartesian"),
+  seed         = 123,
+  grid_id      = "grid"
+)
+
+# Resultados del grid
+# ==============================================================================
+resultados_grid <- h2o.getGrid(
+  sort_by = 'rmse',
+  grid_id = "grid",
+  decreasing = FALSE
+)
+data.frame(resultados_grid@summary_table)
+
+
+# Mejor modelo encontrado
+# ==============================================================================
+modelo_final <- h2o.getModel(resultados_grid@model_ids[[1]])
+
+
+
+#error del test
+
+predicciones1 <- h2o.predict(
+  object  = modelo_final,
+  newdata = datos_test 
+)
+
+
+
+predicciones1 <- predicciones1 %>%
+  as_tibble() %>%
+  mutate(valor_real = as.vector(datos_test$`1065`))
+
+predicciones1
+
+modelo_final <- h2o.getModel(resultados_grid@model_ids[[2]])
+
+
+
+#error del test
+
+predicciones2 <- h2o.predict(
+  object  = modelo_final,
+  newdata = datos_test 
+)
+
+
+
+predicciones2 <- predicciones2 %>%
+  as_tibble() %>%
+  mutate(valor_real = as.vector(datos_test$`1065`))
+predicciones2
+
+modelo_final <- h2o.getModel(resultados_grid@model_ids[[3]])
+
+
+
+#error del test
+
+predicciones3 <- h2o.predict(
+  object  = modelo_final,
+  newdata = datos_test 
+)
+
+
+
+predicciones3 <- predicciones3 %>%
+  as_tibble() %>%
+  mutate(valor_real = as.vector(datos_test$`1065`))
+predicciones3
+
+modelos<-data.frame(resultados_grid@summary_table)
+
+datomodelo<-data.frame()
+datomodelo<-modelos[1,]
+datomodelo<-rbind(datomodelo,modelos[2,])
+datomodelo<-rbind(datomodelo,modelos[3,])
+
+prediccionesdatos<-data.frame()
+prediccionesdatos<-predicciones1
+prediccionesdatos<-rbind(prediccionesdatos,predicciones2)
+prediccionesdatos<-rbind(prediccionesdatos,predicciones3)
+
+
+datomodelo
+print(prediccionesdatos, n=30)
+
+todosdatosmodelo<-rbind(todosdatosmodelo,datomodelo)
+todosdatospredict<-rbind(todosdatospredict,prediccionesdatos)
+
+
+set.seed(123)
+split_inicial <- initial_split(
+  data   = espectros,
+  prop   = 0.8,
+  strata = `1496`
+)
+
+datos_train <- training(split_inicial)
+datos_test  <- testing(split_inicial)
+
+summary(datos_train$`1496`)
+summary(datos_test$`1496`)
+
+
+h2o.init(
+  nthreads = -1,
+  max_mem_size = "4g"
+)
+h2o.removeAll()
+h2o.no_progress()
+
+
+#aplicar el pretratamiento de los datos
+transformer <- recipe(
+  formula = . ~ .,
+  data =  datos_train
+) %>%
+  update_role(c(concentration,method,time),new_role = "predictor") %>%
+  step_naomit(all_predictors()) %>%
+  step_nzv(all_predictors()) %>%
+  step_center(all_numeric(), -all_outcomes()) %>%
+  step_scale(all_numeric(), -all_outcomes()) %>%
+  step_dummy(all_nominal(), -all_outcomes())
+
+transformer
+
+# Se entrena el objeto recipe
+transformer_fit <- prep(transformer)
+
+# Se aplican las transformaciones al conjunto de entrenamiento y de test
+datos_train_prep <- bake(transformer_fit, new_data = datos_train)
+datos_test_prep  <- bake(transformer_fit, new_data = datos_test)
+
+glimpse(datos_train_prep)
+
+
+#trasnferir al cluster
+datos_train  <- as.h2o(datos_train_prep, key = "datos_train")
+datos_test   <- as.h2o(datos_test_prep, key = "datos_test")
+
+
+# Espacio de búsqueda de cada hiperparámetro
+# ==============================================================================
+hiperparametros <- list(
+  epochs = c(50, 100, 500,50000),
+  hidden = list(5, 10, 25, 50, c(10, 10),c(25,25,25),100)
+)
+
+
+
+# Búsqueda por validación cruzada
+# ==============================================================================
+variable_respuesta <- '1496'
+predictores <- c("method_HP","method_P","time")
+
+grid <- h2o.grid(
+  algorithm    = "deeplearning",
+  activation   = "Rectifier",
+  x            = predictores,
+  y            = variable_respuesta,
+  training_frame  = datos_train,
+  nfolds       = 3, #validacion cruzada
+  standardize  = FALSE,
+  hyper_params = hiperparametros,
+  search_criteria = list(strategy = "Cartesian"),
+  seed         = 123,
+  grid_id      = "grid"
+)
+
+# Resultados del grid
+# ==============================================================================
+resultados_grid <- h2o.getGrid(
+  sort_by = 'rmse',
+  grid_id = "grid",
+  decreasing = FALSE
+)
+data.frame(resultados_grid@summary_table)
+
+
+# Mejor modelo encontrado
+# ==============================================================================
+modelo_final <- h2o.getModel(resultados_grid@model_ids[[1]])
+
+
+
+#error del test
+
+predicciones1 <- h2o.predict(
+  object  = modelo_final,
+  newdata = datos_test 
+)
+
+
+
+predicciones1 <- predicciones1 %>%
+  as_tibble() %>%
+  mutate(valor_real = as.vector(datos_test$`1496`))
+
+predicciones1
+
+modelo_final <- h2o.getModel(resultados_grid@model_ids[[2]])
+
+
+
+#error del test
+
+predicciones2 <- h2o.predict(
+  object  = modelo_final,
+  newdata = datos_test 
+)
+
+
+
+predicciones2 <- predicciones2 %>%
+  as_tibble() %>%
+  mutate(valor_real = as.vector(datos_test$`1496`))
+predicciones2
+
+modelo_final <- h2o.getModel(resultados_grid@model_ids[[3]])
+
+
+
+#error del test
+
+predicciones3 <- h2o.predict(
+  object  = modelo_final,
+  newdata = datos_test 
+)
+
+
+
+predicciones3 <- predicciones3 %>%
+  as_tibble() %>%
+  mutate(valor_real = as.vector(datos_test$`1496`))
+predicciones3
+
+modelos<-data.frame(resultados_grid@summary_table)
+
+datomodelo<-data.frame()
+datomodelo<-modelos[1,]
+datomodelo<-rbind(datomodelo,modelos[2,])
+datomodelo<-rbind(datomodelo,modelos[3,])
+
+prediccionesdatos<-data.frame()
+prediccionesdatos<-predicciones1
+prediccionesdatos<-rbind(prediccionesdatos,predicciones2)
+prediccionesdatos<-rbind(prediccionesdatos,predicciones3)
+
+
+datomodelo
+print(prediccionesdatos, n=30)
+todosdatosmodelo<-rbind(todosdatosmodelo,datomodelo)
+todosdatospredict<-rbind(todosdatospredict,prediccionesdatos)
+
+
+
+set.seed(123)
+split_inicial <- initial_split(
+  data   = espectros,
+  prop   = 0.8,
+  strata = `1510`
+)
+
+datos_train <- training(split_inicial)
+datos_test  <- testing(split_inicial)
+
+summary(datos_train$`1510`)
+summary(datos_test$`1510`)
+
+
+h2o.init(
+  nthreads = -1,
+  max_mem_size = "4g"
+)
+h2o.removeAll()
+h2o.no_progress()
+
+
+#aplicar el pretratamiento de los datos
+transformer <- recipe(
+  formula = . ~ .,
+  data =  datos_train
+) %>%
+  update_role(c(concentration,method,time),new_role = "predictor") %>%
+  step_naomit(all_predictors()) %>%
+  step_nzv(all_predictors()) %>%
+  step_center(all_numeric(), -all_outcomes()) %>%
+  step_scale(all_numeric(), -all_outcomes()) %>%
+  step_dummy(all_nominal(), -all_outcomes())
+
+transformer
+
+# Se entrena el objeto recipe
+transformer_fit <- prep(transformer)
+
+# Se aplican las transformaciones al conjunto de entrenamiento y de test
+datos_train_prep <- bake(transformer_fit, new_data = datos_train)
+datos_test_prep  <- bake(transformer_fit, new_data = datos_test)
+
+glimpse(datos_train_prep)
+
+
+#trasnferir al cluster
+datos_train  <- as.h2o(datos_train_prep, key = "datos_train")
+datos_test   <- as.h2o(datos_test_prep, key = "datos_test")
+
+
+# Espacio de búsqueda de cada hiperparámetro
+# ==============================================================================
+hiperparametros <- list(
+  epochs = c(50, 100, 500,50000),
+  hidden = list(5, 10, 25, 50, c(10, 10),c(25,25,25),100)
+)
+
+
+
+# Búsqueda por validación cruzada
+# ==============================================================================
+variable_respuesta <- '1510'
+predictores <- c("method_HP","method_P","time")
+
+grid <- h2o.grid(
+  algorithm    = "deeplearning",
+  activation   = "Rectifier",
+  x            = predictores,
+  y            = variable_respuesta,
+  training_frame  = datos_train,
+  nfolds       = 3, #validacion cruzada
+  standardize  = FALSE,
+  hyper_params = hiperparametros,
+  search_criteria = list(strategy = "Cartesian"),
+  seed         = 123,
+  grid_id      = "grid"
+)
+
+# Resultados del grid
+# ==============================================================================
+resultados_grid <- h2o.getGrid(
+  sort_by = 'rmse',
+  grid_id = "grid",
+  decreasing = FALSE
+)
+data.frame(resultados_grid@summary_table)
+
+
+# Mejor modelo encontrado
+# ==============================================================================
+modelo_final <- h2o.getModel(resultados_grid@model_ids[[1]])
+
+
+
+#error del test
+
+predicciones1 <- h2o.predict(
+  object  = modelo_final,
+  newdata = datos_test 
+)
+
+
+
+predicciones1 <- predicciones1 %>%
+  as_tibble() %>%
+  mutate(valor_real = as.vector(datos_test$`1510`))
+
+predicciones1
+
+modelo_final <- h2o.getModel(resultados_grid@model_ids[[2]])
+
+
+
+#error del test
+
+predicciones2 <- h2o.predict(
+  object  = modelo_final,
+  newdata = datos_test 
+)
+
+
+
+predicciones2 <- predicciones2 %>%
+  as_tibble() %>%
+  mutate(valor_real = as.vector(datos_test$`1510`))
+predicciones2
+
+modelo_final <- h2o.getModel(resultados_grid@model_ids[[3]])
+
+
+
+#error del test
+
+predicciones3 <- h2o.predict(
+  object  = modelo_final,
+  newdata = datos_test 
+)
+
+
+
+predicciones3 <- predicciones3 %>%
+  as_tibble() %>%
+  mutate(valor_real = as.vector(datos_test$`1510`))
+predicciones3
+
+modelos<-data.frame(resultados_grid@summary_table)
+
+datomodelo<-data.frame()
+datomodelo<-modelos[1,]
+datomodelo<-rbind(datomodelo,modelos[2,])
+datomodelo<-rbind(datomodelo,modelos[3,])
+
+prediccionesdatos<-data.frame()
+prediccionesdatos<-predicciones1
+prediccionesdatos<-rbind(prediccionesdatos,predicciones2)
+prediccionesdatos<-rbind(prediccionesdatos,predicciones3)
+
+
+datomodelo
+print(prediccionesdatos, n=30)
+todosdatosmodelo<-rbind(todosdatosmodelo,datomodelo)
+todosdatospredict<-rbind(todosdatospredict,prediccionesdatos)
+
+
+
+set.seed(123)
+split_inicial <- initial_split(
+  data   = espectros,
+  prop   = 0.8,
+  strata = `1524`
+)
+
+datos_train <- training(split_inicial)
+datos_test  <- testing(split_inicial)
+
+summary(datos_train$`1524`)
+summary(datos_test$`1524`)
+
+
+h2o.init(
+  nthreads = -1,
+  max_mem_size = "4g"
+)
+h2o.removeAll()
+h2o.no_progress()
+
+
+#aplicar el pretratamiento de los datos
+transformer <- recipe(
+  formula = . ~ .,
+  data =  datos_train
+) %>%
+  update_role(c(concentration,method,time),new_role = "predictor") %>%
+  step_naomit(all_predictors()) %>%
+  step_nzv(all_predictors()) %>%
+  step_center(all_numeric(), -all_outcomes()) %>%
+  step_scale(all_numeric(), -all_outcomes()) %>%
+  step_dummy(all_nominal(), -all_outcomes())
+
+transformer
+
+# Se entrena el objeto recipe
+transformer_fit <- prep(transformer)
+
+# Se aplican las transformaciones al conjunto de entrenamiento y de test
+datos_train_prep <- bake(transformer_fit, new_data = datos_train)
+datos_test_prep  <- bake(transformer_fit, new_data = datos_test)
+
+glimpse(datos_train_prep)
+
+
+#trasnferir al cluster
+datos_train  <- as.h2o(datos_train_prep, key = "datos_train")
+datos_test   <- as.h2o(datos_test_prep, key = "datos_test")
+
+
+# Espacio de búsqueda de cada hiperparámetro
+# ==============================================================================
+hiperparametros <- list(
+  epochs = c(50, 100, 500,50000),
+  hidden = list(5, 10, 25, 50, c(10, 10),c(25,25,25),100)
+)
+
+
+
+# Búsqueda por validación cruzada
+# ==============================================================================
+variable_respuesta <- '1524'
+predictores <- c("method_HP","method_P","time")
+
+grid <- h2o.grid(
+  algorithm    = "deeplearning",
+  activation   = "Rectifier",
+  x            = predictores,
+  y            = variable_respuesta,
+  training_frame  = datos_train,
+  nfolds       = 3, #validacion cruzada
+  standardize  = FALSE,
+  hyper_params = hiperparametros,
+  search_criteria = list(strategy = "Cartesian"),
+  seed         = 123,
+  grid_id      = "grid"
+)
+
+# Resultados del grid
+# ==============================================================================
+resultados_grid <- h2o.getGrid(
+  sort_by = 'rmse',
+  grid_id = "grid",
+  decreasing = FALSE
+)
+data.frame(resultados_grid@summary_table)
+
+
+# Mejor modelo encontrado
+# ==============================================================================
+modelo_final <- h2o.getModel(resultados_grid@model_ids[[1]])
+
+
+
+#error del test
+
+predicciones1 <- h2o.predict(
+  object  = modelo_final,
+  newdata = datos_test 
+)
+
+
+
+predicciones1 <- predicciones1 %>%
+  as_tibble() %>%
+  mutate(valor_real = as.vector(datos_test$`1524`))
+
+predicciones1
+
+modelo_final <- h2o.getModel(resultados_grid@model_ids[[2]])
+
+
+
+#error del test
+
+predicciones2 <- h2o.predict(
+  object  = modelo_final,
+  newdata = datos_test 
+)
+
+
+
+predicciones2 <- predicciones2 %>%
+  as_tibble() %>%
+  mutate(valor_real = as.vector(datos_test$`1524`))
+predicciones2
+
+modelo_final <- h2o.getModel(resultados_grid@model_ids[[3]])
+
+
+
+#error del test
+
+predicciones3 <- h2o.predict(
+  object  = modelo_final,
+  newdata = datos_test 
+)
+
+
+
+predicciones3 <- predicciones3 %>%
+  as_tibble() %>%
+  mutate(valor_real = as.vector(datos_test$`1524`))
+predicciones3
+
+modelos<-data.frame(resultados_grid@summary_table)
+
+datomodelo<-data.frame()
+datomodelo<-modelos[1,]
+datomodelo<-rbind(datomodelo,modelos[2,])
+datomodelo<-rbind(datomodelo,modelos[3,])
+
+prediccionesdatos<-data.frame()
+prediccionesdatos<-predicciones1
+prediccionesdatos<-rbind(prediccionesdatos,predicciones2)
+prediccionesdatos<-rbind(prediccionesdatos,predicciones3)
+
+
+datomodelo
+print(prediccionesdatos, n=30)
+
+todosdatosmodelo<-rbind(todosdatosmodelo,datomodelo)
+todosdatospredict<-rbind(todosdatospredict,prediccionesdatos)
+
+
+set.seed(123)
+split_inicial <- initial_split(
+  data   = espectros,
+  prop   = 0.8,
+  strata = `1708`
+)
+
+datos_train <- training(split_inicial)
+datos_test  <- testing(split_inicial)
+
+summary(datos_train$`1708`)
+summary(datos_test$`1708`)
+
+
+h2o.init(
+  nthreads = -1,
+  max_mem_size = "4g"
+)
+h2o.removeAll()
+h2o.no_progress()
+
+
+#aplicar el pretratamiento de los datos
+transformer <- recipe(
+  formula = . ~ .,
+  data =  datos_train
+) %>%
+  update_role(c(concentration,method,time),new_role = "predictor") %>%
+  step_naomit(all_predictors()) %>%
+  step_nzv(all_predictors()) %>%
+  step_center(all_numeric(), -all_outcomes()) %>%
+  step_scale(all_numeric(), -all_outcomes()) %>%
+  step_dummy(all_nominal(), -all_outcomes())
+
+transformer
+
+# Se entrena el objeto recipe
+transformer_fit <- prep(transformer)
+
+# Se aplican las transformaciones al conjunto de entrenamiento y de test
+datos_train_prep <- bake(transformer_fit, new_data = datos_train)
+datos_test_prep  <- bake(transformer_fit, new_data = datos_test)
+
+glimpse(datos_train_prep)
+
+
+#trasnferir al cluster
+datos_train  <- as.h2o(datos_train_prep, key = "datos_train")
+datos_test   <- as.h2o(datos_test_prep, key = "datos_test")
+
+
+# Espacio de búsqueda de cada hiperparámetro
+# ==============================================================================
+hiperparametros <- list(
+  epochs = c(50, 100, 500,50000),
+  hidden = list(5, 10, 25, 50, c(10, 10),c(25,25,25),100)
+)
+
+
+
+# Búsqueda por validación cruzada
+# ==============================================================================
+variable_respuesta <- '1708'
+predictores <- c("method_HP","method_P","time")
+
+grid <- h2o.grid(
+  algorithm    = "deeplearning",
+  activation   = "Rectifier",
+  x            = predictores,
+  y            = variable_respuesta,
+  training_frame  = datos_train,
+  nfolds       = 3, #validacion cruzada
+  standardize  = FALSE,
+  hyper_params = hiperparametros,
+  search_criteria = list(strategy = "Cartesian"),
+  seed         = 123,
+  grid_id      = "grid"
+)
+
+# Resultados del grid
+# ==============================================================================
+resultados_grid <- h2o.getGrid(
+  sort_by = 'rmse',
+  grid_id = "grid",
+  decreasing = FALSE
+)
+data.frame(resultados_grid@summary_table)
+
+
+# Mejor modelo encontrado
+# ==============================================================================
+modelo_final <- h2o.getModel(resultados_grid@model_ids[[1]])
+
+
+
+#error del test
+
+predicciones1 <- h2o.predict(
+  object  = modelo_final,
+  newdata = datos_test 
+)
+
+
+
+predicciones1 <- predicciones1 %>%
+  as_tibble() %>%
+  mutate(valor_real = as.vector(datos_test$`1708`))
+
+predicciones1
+
+modelo_final <- h2o.getModel(resultados_grid@model_ids[[2]])
+
+
+
+#error del test
+
+predicciones2 <- h2o.predict(
+  object  = modelo_final,
+  newdata = datos_test 
+)
+
+
+
+predicciones2 <- predicciones2 %>%
+  as_tibble() %>%
+  mutate(valor_real = as.vector(datos_test$`1708`))
+predicciones2
+
+modelo_final <- h2o.getModel(resultados_grid@model_ids[[3]])
+
+
+
+#error del test
+
+predicciones3 <- h2o.predict(
+  object  = modelo_final,
+  newdata = datos_test 
+)
+
+
+
+predicciones3 <- predicciones3 %>%
+  as_tibble() %>%
+  mutate(valor_real = as.vector(datos_test$`1708`))
+predicciones3
+
+modelos<-data.frame(resultados_grid@summary_table)
+
+datomodelo<-data.frame()
+datomodelo<-modelos[1,]
+datomodelo<-rbind(datomodelo,modelos[2,])
+datomodelo<-rbind(datomodelo,modelos[3,])
+
+prediccionesdatos<-data.frame()
+prediccionesdatos<-predicciones1
+prediccionesdatos<-rbind(prediccionesdatos,predicciones2)
+prediccionesdatos<-rbind(prediccionesdatos,predicciones3)
+
+
+datomodelo
+print(prediccionesdatos, n=30)
+
+todosdatosmodelo<-rbind(todosdatosmodelo,datomodelo)
+todosdatospredict<-rbind(todosdatospredict,prediccionesdatos)
+
+
+set.seed(123)
+split_inicial <- initial_split(
+  data   = espectros,
+  prop   = 0.8,
+  strata = `1850`
+)
+
+datos_train <- training(split_inicial)
+datos_test  <- testing(split_inicial)
+
+summary(datos_train$`1850`)
+summary(datos_test$`1850`)
+
+
+h2o.init(
+  nthreads = -1,
+  max_mem_size = "4g"
+)
+h2o.removeAll()
+h2o.no_progress()
+
+
+#aplicar el pretratamiento de los datos
+transformer <- recipe(
+  formula = . ~ .,
+  data =  datos_train
+) %>%
+  update_role(c(concentration,method,time),new_role = "predictor") %>%
+  step_naomit(all_predictors()) %>%
+  step_nzv(all_predictors()) %>%
+  step_center(all_numeric(), -all_outcomes()) %>%
+  step_scale(all_numeric(), -all_outcomes()) %>%
+  step_dummy(all_nominal(), -all_outcomes())
+
+transformer
+
+# Se entrena el objeto recipe
+transformer_fit <- prep(transformer)
+
+# Se aplican las transformaciones al conjunto de entrenamiento y de test
+datos_train_prep <- bake(transformer_fit, new_data = datos_train)
+datos_test_prep  <- bake(transformer_fit, new_data = datos_test)
+
+glimpse(datos_train_prep)
+
+
+#trasnferir al cluster
+datos_train  <- as.h2o(datos_train_prep, key = "datos_train")
+datos_test   <- as.h2o(datos_test_prep, key = "datos_test")
+
+
+# Espacio de búsqueda de cada hiperparámetro
+# ==============================================================================
+hiperparametros <- list(
+  epochs = c(50, 100, 500,50000),
+  hidden = list(5, 10, 25, 50, c(10, 10),c(25,25,25),100)
+)
+
+
+
+# Búsqueda por validación cruzada
+# ==============================================================================
+variable_respuesta <- '1850'
+predictores <- c("method_HP","method_P","time")
+
+grid <- h2o.grid(
+  algorithm    = "deeplearning",
+  activation   = "Rectifier",
+  x            = predictores,
+  y            = variable_respuesta,
+  training_frame  = datos_train,
+  nfolds       = 3, #validacion cruzada
+  standardize  = FALSE,
+  hyper_params = hiperparametros,
+  search_criteria = list(strategy = "Cartesian"),
+  seed         = 123,
+  grid_id      = "grid"
+)
+
+# Resultados del grid
+# ==============================================================================
+resultados_grid <- h2o.getGrid(
+  sort_by = 'rmse',
+  grid_id = "grid",
+  decreasing = FALSE
+)
+data.frame(resultados_grid@summary_table)
+
+
+# Mejor modelo encontrado
+# ==============================================================================
+modelo_final <- h2o.getModel(resultados_grid@model_ids[[1]])
+
+
+
+#error del test
+
+predicciones1 <- h2o.predict(
+  object  = modelo_final,
+  newdata = datos_test 
+)
+
+
+
+predicciones1 <- predicciones1 %>%
+  as_tibble() %>%
+  mutate(valor_real = as.vector(datos_test$`1850`))
+
+predicciones1
+
+modelo_final <- h2o.getModel(resultados_grid@model_ids[[2]])
+
+
+
+#error del test
+
+predicciones2 <- h2o.predict(
+  object  = modelo_final,
+  newdata = datos_test 
+)
+
+
+
+predicciones2 <- predicciones2 %>%
+  as_tibble() %>%
+  mutate(valor_real = as.vector(datos_test$`1850`))
+predicciones2
+
+modelo_final <- h2o.getModel(resultados_grid@model_ids[[3]])
+
+
+
+#error del test
+
+predicciones3 <- h2o.predict(
+  object  = modelo_final,
+  newdata = datos_test 
+)
+
+
+
+predicciones3 <- predicciones3 %>%
+  as_tibble() %>%
+  mutate(valor_real = as.vector(datos_test$`1850`))
+predicciones3
+
+modelos<-data.frame(resultados_grid@summary_table)
+
+datomodelo<-data.frame()
+datomodelo<-modelos[1,]
+datomodelo<-rbind(datomodelo,modelos[2,])
+datomodelo<-rbind(datomodelo,modelos[3,])
+
+prediccionesdatos<-data.frame()
+prediccionesdatos<-predicciones1
+prediccionesdatos<-rbind(prediccionesdatos,predicciones2)
+prediccionesdatos<-rbind(prediccionesdatos,predicciones3)
+
+
+datomodelo
+print(prediccionesdatos, n=30)
+
+todosdatosmodelo<-rbind(todosdatosmodelo,datomodelo)
+todosdatospredict<-rbind(todosdatospredict,prediccionesdatos)
+
+
+set.seed(123)
+split_inicial <- initial_split(
+  data   = espectros,
+  prop   = 0.8,
+  strata = `1861`
+)
+
+datos_train <- training(split_inicial)
+datos_test  <- testing(split_inicial)
+
+summary(datos_train$`1861`)
+summary(datos_test$`1861`)
+
+
+h2o.init(
+  nthreads = -1,
+  max_mem_size = "4g"
+)
+h2o.removeAll()
+h2o.no_progress()
+
+
+#aplicar el pretratamiento de los datos
+transformer <- recipe(
+  formula = . ~ .,
+  data =  datos_train
+) %>%
+  update_role(c(concentration,method,time),new_role = "predictor") %>%
+  step_naomit(all_predictors()) %>%
+  step_nzv(all_predictors()) %>%
+  step_center(all_numeric(), -all_outcomes()) %>%
+  step_scale(all_numeric(), -all_outcomes()) %>%
+  step_dummy(all_nominal(), -all_outcomes())
+
+transformer
+
+# Se entrena el objeto recipe
+transformer_fit <- prep(transformer)
+
+# Se aplican las transformaciones al conjunto de entrenamiento y de test
+datos_train_prep <- bake(transformer_fit, new_data = datos_train)
+datos_test_prep  <- bake(transformer_fit, new_data = datos_test)
+
+glimpse(datos_train_prep)
+
+
+#trasnferir al cluster
+datos_train  <- as.h2o(datos_train_prep, key = "datos_train")
+datos_test   <- as.h2o(datos_test_prep, key = "datos_test")
+
+
+# Espacio de búsqueda de cada hiperparámetro
+# ==============================================================================
+hiperparametros <- list(
+  epochs = c(50, 100, 500,50000),
+  hidden = list(5, 10, 25, 50, c(10, 10),c(25,25,25),100)
+)
+
+
+
+# Búsqueda por validación cruzada
+# ==============================================================================
+variable_respuesta <- '1861'
+predictores <- c("method_HP","method_P","time")
+
+grid <- h2o.grid(
+  algorithm    = "deeplearning",
+  activation   = "Rectifier",
+  x            = predictores,
+  y            = variable_respuesta,
+  training_frame  = datos_train,
+  nfolds       = 3, #validacion cruzada
+  standardize  = FALSE,
+  hyper_params = hiperparametros,
+  search_criteria = list(strategy = "Cartesian"),
+  seed         = 123,
+  grid_id      = "grid"
+)
+
+# Resultados del grid
+# ==============================================================================
+resultados_grid <- h2o.getGrid(
+  sort_by = 'rmse',
+  grid_id = "grid",
+  decreasing = FALSE
+)
+data.frame(resultados_grid@summary_table)
+
+
+# Mejor modelo encontrado
+# ==============================================================================
+modelo_final <- h2o.getModel(resultados_grid@model_ids[[1]])
+
+
+
+#error del test
+
+predicciones1 <- h2o.predict(
+  object  = modelo_final,
+  newdata = datos_test 
+)
+
+
+
+predicciones1 <- predicciones1 %>%
+  as_tibble() %>%
+  mutate(valor_real = as.vector(datos_test$`1861`))
+
+predicciones1
+
+modelo_final <- h2o.getModel(resultados_grid@model_ids[[2]])
+
+
+
+#error del test
+
+predicciones2 <- h2o.predict(
+  object  = modelo_final,
+  newdata = datos_test 
+)
+
+
+
+predicciones2 <- predicciones2 %>%
+  as_tibble() %>%
+  mutate(valor_real = as.vector(datos_test$`1861`))
+predicciones2
+
+modelo_final <- h2o.getModel(resultados_grid@model_ids[[3]])
+
+
+
+#error del test
+
+predicciones3 <- h2o.predict(
+  object  = modelo_final,
+  newdata = datos_test 
+)
+
+
+
+predicciones3 <- predicciones3 %>%
+  as_tibble() %>%
+  mutate(valor_real = as.vector(datos_test$`1861`))
+predicciones3
+
+modelos<-data.frame(resultados_grid@summary_table)
+
+datomodelo<-data.frame()
+datomodelo<-modelos[1,]
+datomodelo<-rbind(datomodelo,modelos[2,])
+datomodelo<-rbind(datomodelo,modelos[3,])
+
+prediccionesdatos<-data.frame()
+prediccionesdatos<-predicciones1
+prediccionesdatos<-rbind(prediccionesdatos,predicciones2)
+prediccionesdatos<-rbind(prediccionesdatos,predicciones3)
+
+
+datomodelo
+print(prediccionesdatos, n=30)
+
+todosdatosmodelo<-rbind(todosdatosmodelo,datomodelo)
+todosdatospredict<-rbind(todosdatospredict,prediccionesdatos)
+
+
+set.seed(123)
+split_inicial <- initial_split(
+  data   = espectros,
+  prop   = 0.8,
+  strata = `393`
+)
+
+datos_train <- training(split_inicial)
+datos_test  <- testing(split_inicial)
+
+summary(datos_train$`393`)
+summary(datos_test$`393`)
+
+
+h2o.init(
+  nthreads = -1,
+  max_mem_size = "4g"
+)
+h2o.removeAll()
+h2o.no_progress()
+
+
+#aplicar el pretratamiento de los datos
+transformer <- recipe(
+  formula = . ~ .,
+  data =  datos_train
+) %>%
+  update_role(c(concentration,method,time),new_role = "predictor") %>%
+  step_naomit(all_predictors()) %>%
+  step_nzv(all_predictors()) %>%
+  step_center(all_numeric(), -all_outcomes()) %>%
+  step_scale(all_numeric(), -all_outcomes()) %>%
+  step_dummy(all_nominal(), -all_outcomes())
+
+transformer
+
+# Se entrena el objeto recipe
+transformer_fit <- prep(transformer)
+
+# Se aplican las transformaciones al conjunto de entrenamiento y de test
+datos_train_prep <- bake(transformer_fit, new_data = datos_train)
+datos_test_prep  <- bake(transformer_fit, new_data = datos_test)
+
+glimpse(datos_train_prep)
+
+
+#trasnferir al cluster
+datos_train  <- as.h2o(datos_train_prep, key = "datos_train")
+datos_test   <- as.h2o(datos_test_prep, key = "datos_test")
+
+
+# Espacio de búsqueda de cada hiperparámetro
+# ==============================================================================
+hiperparametros <- list(
+  epochs = c(50, 100, 500,50000),
+  hidden = list(5, 10, 25, 50, c(10, 10),c(25,25,25),100)
+)
+
+
+
+# Búsqueda por validación cruzada
+# ==============================================================================
+variable_respuesta <- '393'
+predictores <- c("method_HP","method_P","time")
+
+grid <- h2o.grid(
+  algorithm    = "deeplearning",
+  activation   = "Rectifier",
+  x            = predictores,
+  y            = variable_respuesta,
+  training_frame  = datos_train,
+  nfolds       = 3, #validacion cruzada
+  standardize  = FALSE,
+  hyper_params = hiperparametros,
+  search_criteria = list(strategy = "Cartesian"),
+  seed         = 123,
+  grid_id      = "grid"
+)
+
+# Resultados del grid
+# ==============================================================================
+resultados_grid <- h2o.getGrid(
+  sort_by = 'rmse',
+  grid_id = "grid",
+  decreasing = FALSE
+)
+data.frame(resultados_grid@summary_table)
+
+
+# Mejor modelo encontrado
+# ==============================================================================
+modelo_final <- h2o.getModel(resultados_grid@model_ids[[1]])
+
+
+
+#error del test
+
+predicciones1 <- h2o.predict(
+  object  = modelo_final,
+  newdata = datos_test 
+)
+
+
+
+predicciones1 <- predicciones1 %>%
+  as_tibble() %>%
+  mutate(valor_real = as.vector(datos_test$`393`))
+
+predicciones1
+
+modelo_final <- h2o.getModel(resultados_grid@model_ids[[2]])
+
+
+
+#error del test
+
+predicciones2 <- h2o.predict(
+  object  = modelo_final,
+  newdata = datos_test 
+)
+
+
+
+predicciones2 <- predicciones2 %>%
+  as_tibble() %>%
+  mutate(valor_real = as.vector(datos_test$`393`))
+predicciones2
+
+modelo_final <- h2o.getModel(resultados_grid@model_ids[[3]])
+
+
+
+#error del test
+
+predicciones3 <- h2o.predict(
+  object  = modelo_final,
+  newdata = datos_test 
+)
+
+
+
+predicciones3 <- predicciones3 %>%
+  as_tibble() %>%
+  mutate(valor_real = as.vector(datos_test$`393`))
+predicciones3
+
+modelos<-data.frame(resultados_grid@summary_table)
+
+datomodelo<-data.frame()
+datomodelo<-modelos[1,]
+datomodelo<-rbind(datomodelo,modelos[2,])
+datomodelo<-rbind(datomodelo,modelos[3,])
+
+prediccionesdatos<-data.frame()
+prediccionesdatos<-predicciones1
+prediccionesdatos<-rbind(prediccionesdatos,predicciones2)
+prediccionesdatos<-rbind(prediccionesdatos,predicciones3)
+
+
+datomodelo
+print(prediccionesdatos, n=30)
+
+todosdatosmodelo<-rbind(todosdatosmodelo,datomodelo)
+todosdatospredict<-rbind(todosdatospredict,prediccionesdatos)
+
+
+set.seed(123)
+split_inicial <- initial_split(
+  data   = espectros,
+  prop   = 0.8,
+  strata = `398`
+)
+
+datos_train <- training(split_inicial)
+datos_test  <- testing(split_inicial)
+
+summary(datos_train$`398`)
+summary(datos_test$`398`)
+
+
+h2o.init(
+  nthreads = -1,
+  max_mem_size = "4g"
+)
+h2o.removeAll()
+h2o.no_progress()
+
+
+#aplicar el pretratamiento de los datos
+transformer <- recipe(
+  formula = . ~ .,
+  data =  datos_train
+) %>%
+  update_role(c(concentration,method,time),new_role = "predictor") %>%
+  step_naomit(all_predictors()) %>%
+  step_nzv(all_predictors()) %>%
+  step_center(all_numeric(), -all_outcomes()) %>%
+  step_scale(all_numeric(), -all_outcomes()) %>%
+  step_dummy(all_nominal(), -all_outcomes())
+
+transformer
+
+# Se entrena el objeto recipe
+transformer_fit <- prep(transformer)
+
+# Se aplican las transformaciones al conjunto de entrenamiento y de test
+datos_train_prep <- bake(transformer_fit, new_data = datos_train)
+datos_test_prep  <- bake(transformer_fit, new_data = datos_test)
+
+glimpse(datos_train_prep)
+
+
+#trasnferir al cluster
+datos_train  <- as.h2o(datos_train_prep, key = "datos_train")
+datos_test   <- as.h2o(datos_test_prep, key = "datos_test")
+
+
+# Espacio de búsqueda de cada hiperparámetro
+# ==============================================================================
+hiperparametros <- list(
+  epochs = c(50, 100, 500,50000),
+  hidden = list(5, 10, 25, 50, c(10, 10),c(25,25,25),100)
+)
+
+
+
+# Búsqueda por validación cruzada
+# ==============================================================================
+variable_respuesta <- '398'
+predictores <- c("method_HP","method_P","time")
+
+grid <- h2o.grid(
+  algorithm    = "deeplearning",
+  activation   = "Rectifier",
+  x            = predictores,
+  y            = variable_respuesta,
+  training_frame  = datos_train,
+  nfolds       = 3, #validacion cruzada
+  standardize  = FALSE,
+  hyper_params = hiperparametros,
+  search_criteria = list(strategy = "Cartesian"),
+  seed         = 123,
+  grid_id      = "grid"
+)
+
+# Resultados del grid
+# ==============================================================================
+resultados_grid <- h2o.getGrid(
+  sort_by = 'rmse',
+  grid_id = "grid",
+  decreasing = FALSE
+)
+data.frame(resultados_grid@summary_table)
+
+
+# Mejor modelo encontrado
+# ==============================================================================
+modelo_final <- h2o.getModel(resultados_grid@model_ids[[1]])
+
+
+
+#error del test
+
+predicciones1 <- h2o.predict(
+  object  = modelo_final,
+  newdata = datos_test 
+)
+
+
+
+predicciones1 <- predicciones1 %>%
+  as_tibble() %>%
+  mutate(valor_real = as.vector(datos_test$`398`))
+
+predicciones1
+
+modelo_final <- h2o.getModel(resultados_grid@model_ids[[2]])
+
+
+
+#error del test
+
+predicciones2 <- h2o.predict(
+  object  = modelo_final,
+  newdata = datos_test 
+)
+
+
+
+predicciones2 <- predicciones2 %>%
+  as_tibble() %>%
+  mutate(valor_real = as.vector(datos_test$`398`))
+predicciones2
+
+modelo_final <- h2o.getModel(resultados_grid@model_ids[[3]])
+
+
+
+#error del test
+
+predicciones3 <- h2o.predict(
+  object  = modelo_final,
+  newdata = datos_test 
+)
+
+
+
+predicciones3 <- predicciones3 %>%
+  as_tibble() %>%
+  mutate(valor_real = as.vector(datos_test$`398`))
+predicciones3
+
+modelos<-data.frame(resultados_grid@summary_table)
+
+datomodelo<-data.frame()
+datomodelo<-modelos[1,]
+datomodelo<-rbind(datomodelo,modelos[2,])
+datomodelo<-rbind(datomodelo,modelos[3,])
+
+prediccionesdatos<-data.frame()
+prediccionesdatos<-predicciones1
+prediccionesdatos<-rbind(prediccionesdatos,predicciones2)
+prediccionesdatos<-rbind(prediccionesdatos,predicciones3)
+
+
+datomodelo
+print(prediccionesdatos, n=30)
+
+todosdatosmodelo<-rbind(todosdatosmodelo,datomodelo)
+todosdatospredict<-rbind(todosdatospredict,prediccionesdatos)
+
+
+set.seed(123)
+split_inicial <- initial_split(
+  data   = espectros,
+  prop   = 0.8,
+  strata = `403`
+)
+
+datos_train <- training(split_inicial)
+datos_test  <- testing(split_inicial)
+
+summary(datos_train$`403`)
+summary(datos_test$`403`)
+
+
+h2o.init(
+  nthreads = -1,
+  max_mem_size = "4g"
+)
+h2o.removeAll()
+h2o.no_progress()
+
+
+#aplicar el pretratamiento de los datos
+transformer <- recipe(
+  formula = . ~ .,
+  data =  datos_train
+) %>%
+  update_role(c(concentration,method,time),new_role = "predictor") %>%
+  step_naomit(all_predictors()) %>%
+  step_nzv(all_predictors()) %>%
+  step_center(all_numeric(), -all_outcomes()) %>%
+  step_scale(all_numeric(), -all_outcomes()) %>%
+  step_dummy(all_nominal(), -all_outcomes())
+
+transformer
+
+# Se entrena el objeto recipe
+transformer_fit <- prep(transformer)
+
+# Se aplican las transformaciones al conjunto de entrenamiento y de test
+datos_train_prep <- bake(transformer_fit, new_data = datos_train)
+datos_test_prep  <- bake(transformer_fit, new_data = datos_test)
+
+glimpse(datos_train_prep)
+
+
+#trasnferir al cluster
+datos_train  <- as.h2o(datos_train_prep, key = "datos_train")
+datos_test   <- as.h2o(datos_test_prep, key = "datos_test")
+
+
+# Espacio de búsqueda de cada hiperparámetro
+# ==============================================================================
+hiperparametros <- list(
+  epochs = c(50, 100, 500,50000),
+  hidden = list(5, 10, 25, 50, c(10, 10),c(25,25,25),100)
+)
+
+
+
+# Búsqueda por validación cruzada
+# ==============================================================================
+variable_respuesta <- '403'
+predictores <- c("method_HP","method_P","time")
+
+grid <- h2o.grid(
+  algorithm    = "deeplearning",
+  activation   = "Rectifier",
+  x            = predictores,
+  y            = variable_respuesta,
+  training_frame  = datos_train,
+  nfolds       = 3, #validacion cruzada
+  standardize  = FALSE,
+  hyper_params = hiperparametros,
+  search_criteria = list(strategy = "Cartesian"),
+  seed         = 123,
+  grid_id      = "grid"
+)
+
+# Resultados del grid
+# ==============================================================================
+resultados_grid <- h2o.getGrid(
+  sort_by = 'rmse',
+  grid_id = "grid",
+  decreasing = FALSE
+)
+data.frame(resultados_grid@summary_table)
+
+
+# Mejor modelo encontrado
+# ==============================================================================
+modelo_final <- h2o.getModel(resultados_grid@model_ids[[1]])
+
+
+
+#error del test
+
+predicciones1 <- h2o.predict(
+  object  = modelo_final,
+  newdata = datos_test 
+)
+
+
+
+predicciones1 <- predicciones1 %>%
+  as_tibble() %>%
+  mutate(valor_real = as.vector(datos_test$`403`))
+
+predicciones1
+
+modelo_final <- h2o.getModel(resultados_grid@model_ids[[2]])
+
+
+
+#error del test
+
+predicciones2 <- h2o.predict(
+  object  = modelo_final,
+  newdata = datos_test 
+)
+
+
+
+predicciones2 <- predicciones2 %>%
+  as_tibble() %>%
+  mutate(valor_real = as.vector(datos_test$`403`))
+predicciones2
+
+modelo_final <- h2o.getModel(resultados_grid@model_ids[[3]])
+
+
+
+#error del test
+
+predicciones3 <- h2o.predict(
+  object  = modelo_final,
+  newdata = datos_test 
+)
+
+
+
+predicciones3 <- predicciones3 %>%
+  as_tibble() %>%
+  mutate(valor_real = as.vector(datos_test$`403`))
+predicciones3
+
+modelos<-data.frame(resultados_grid@summary_table)
+
+datomodelo<-data.frame()
+datomodelo<-modelos[1,]
+datomodelo<-rbind(datomodelo,modelos[2,])
+datomodelo<-rbind(datomodelo,modelos[3,])
+
+prediccionesdatos<-data.frame()
+prediccionesdatos<-predicciones1
+prediccionesdatos<-rbind(prediccionesdatos,predicciones2)
+prediccionesdatos<-rbind(prediccionesdatos,predicciones3)
+
+
+datomodelo
+print(prediccionesdatos, n=30)
+
+todosdatosmodelo<-rbind(todosdatosmodelo,datomodelo)
+todosdatospredict<-rbind(todosdatospredict,prediccionesdatos)
+
+
+set.seed(123)
+split_inicial <- initial_split(
+  data   = espectros,
+  prop   = 0.8,
+  strata = `574`
+)
+
+datos_train <- training(split_inicial)
+datos_test  <- testing(split_inicial)
+
+summary(datos_train$`574`)
+summary(datos_test$`574`)
+
+
+h2o.init(
+  nthreads = -1,
+  max_mem_size = "4g"
+)
+h2o.removeAll()
+h2o.no_progress()
+
+
+#aplicar el pretratamiento de los datos
+transformer <- recipe(
+  formula = . ~ .,
+  data =  datos_train
+) %>%
+  update_role(c(concentration,method,time),new_role = "predictor") %>%
+  step_naomit(all_predictors()) %>%
+  step_nzv(all_predictors()) %>%
+  step_center(all_numeric(), -all_outcomes()) %>%
+  step_scale(all_numeric(), -all_outcomes()) %>%
+  step_dummy(all_nominal(), -all_outcomes())
+
+transformer
+
+# Se entrena el objeto recipe
+transformer_fit <- prep(transformer)
+
+# Se aplican las transformaciones al conjunto de entrenamiento y de test
+datos_train_prep <- bake(transformer_fit, new_data = datos_train)
+datos_test_prep  <- bake(transformer_fit, new_data = datos_test)
+
+glimpse(datos_train_prep)
+
+
+#trasnferir al cluster
+datos_train  <- as.h2o(datos_train_prep, key = "datos_train")
+datos_test   <- as.h2o(datos_test_prep, key = "datos_test")
+
+
+# Espacio de búsqueda de cada hiperparámetro
+# ==============================================================================
+hiperparametros <- list(
+  epochs = c(50, 100, 500,50000),
+  hidden = list(5, 10, 25, 50, c(10, 10),c(25,25,25),100)
+)
+
+
+
+# Búsqueda por validación cruzada
+# ==============================================================================
+variable_respuesta <- '574'
+predictores <- c("method_HP","method_P","time")
+
+grid <- h2o.grid(
+  algorithm    = "deeplearning",
+  activation   = "Rectifier",
+  x            = predictores,
+  y            = variable_respuesta,
+  training_frame  = datos_train,
+  nfolds       = 3, #validacion cruzada
+  standardize  = FALSE,
+  hyper_params = hiperparametros,
+  search_criteria = list(strategy = "Cartesian"),
+  seed         = 123,
+  grid_id      = "grid"
+)
+
+# Resultados del grid
+# ==============================================================================
+resultados_grid <- h2o.getGrid(
+  sort_by = 'rmse',
+  grid_id = "grid",
+  decreasing = FALSE
+)
+data.frame(resultados_grid@summary_table)
+
+
+# Mejor modelo encontrado
+# ==============================================================================
+modelo_final <- h2o.getModel(resultados_grid@model_ids[[1]])
+
+
+
+#error del test
+
+predicciones1 <- h2o.predict(
+  object  = modelo_final,
+  newdata = datos_test 
+)
+
+
+
+predicciones1 <- predicciones1 %>%
+  as_tibble() %>%
+  mutate(valor_real = as.vector(datos_test$`574`))
+
+predicciones1
+
+modelo_final <- h2o.getModel(resultados_grid@model_ids[[2]])
+
+
+
+#error del test
+
+predicciones2 <- h2o.predict(
+  object  = modelo_final,
+  newdata = datos_test 
+)
+
+
+
+predicciones2 <- predicciones2 %>%
+  as_tibble() %>%
+  mutate(valor_real = as.vector(datos_test$`574`))
+predicciones2
+
+modelo_final <- h2o.getModel(resultados_grid@model_ids[[3]])
+
+
+
+#error del test
+
+predicciones3 <- h2o.predict(
+  object  = modelo_final,
+  newdata = datos_test 
+)
+
+
+
+predicciones3 <- predicciones3 %>%
+  as_tibble() %>%
+  mutate(valor_real = as.vector(datos_test$`574`))
+predicciones3
+
+modelos<-data.frame(resultados_grid@summary_table)
+
+datomodelo<-data.frame()
+datomodelo<-modelos[1,]
+datomodelo<-rbind(datomodelo,modelos[2,])
+datomodelo<-rbind(datomodelo,modelos[3,])
+
+prediccionesdatos<-data.frame()
+prediccionesdatos<-predicciones1
+prediccionesdatos<-rbind(prediccionesdatos,predicciones2)
+prediccionesdatos<-rbind(prediccionesdatos,predicciones3)
+
+
+datomodelo
+print(prediccionesdatos, n=30)
+
+todosdatosmodelo<-rbind(todosdatosmodelo,datomodelo)
+todosdatospredict<-rbind(todosdatospredict,prediccionesdatos)
+
+
+
+set.seed(123)
+split_inicial <- initial_split(
+  data   = espectros,
+  prop   = 0.8,
+  strata = `583`
+)
+
+datos_train <- training(split_inicial)
+datos_test  <- testing(split_inicial)
+
+summary(datos_train$`583`)
+summary(datos_test$`583`)
+
+
+h2o.init(
+  nthreads = -1,
+  max_mem_size = "4g"
+)
+h2o.removeAll()
+h2o.no_progress()
+
+
+#aplicar el pretratamiento de los datos
+transformer <- recipe(
+  formula = . ~ .,
+  data =  datos_train
+) %>%
+  update_role(c(concentration,method,time),new_role = "predictor") %>%
+  step_naomit(all_predictors()) %>%
+  step_nzv(all_predictors()) %>%
+  step_center(all_numeric(), -all_outcomes()) %>%
+  step_scale(all_numeric(), -all_outcomes()) %>%
+  step_dummy(all_nominal(), -all_outcomes())
+
+transformer
+
+# Se entrena el objeto recipe
+transformer_fit <- prep(transformer)
+
+# Se aplican las transformaciones al conjunto de entrenamiento y de test
+datos_train_prep <- bake(transformer_fit, new_data = datos_train)
+datos_test_prep  <- bake(transformer_fit, new_data = datos_test)
+
+glimpse(datos_train_prep)
+
+
+#trasnferir al cluster
+datos_train  <- as.h2o(datos_train_prep, key = "datos_train")
+datos_test   <- as.h2o(datos_test_prep, key = "datos_test")
+
+
+# Espacio de búsqueda de cada hiperparámetro
+# ==============================================================================
+hiperparametros <- list(
+  epochs = c(50, 100, 500,50000),
+  hidden = list(5, 10, 25, 50, c(10, 10),c(25,25,25),100)
+)
+
+
+
+# Búsqueda por validación cruzada
+# ==============================================================================
+variable_respuesta <- '583'
+predictores <- c("method_HP","method_P","time")
+
+grid <- h2o.grid(
+  algorithm    = "deeplearning",
+  activation   = "Rectifier",
+  x            = predictores,
+  y            = variable_respuesta,
+  training_frame  = datos_train,
+  nfolds       = 3, #validacion cruzada
+  standardize  = FALSE,
+  hyper_params = hiperparametros,
+  search_criteria = list(strategy = "Cartesian"),
+  seed         = 123,
+  grid_id      = "grid"
+)
+
+# Resultados del grid
+# ==============================================================================
+resultados_grid <- h2o.getGrid(
+  sort_by = 'rmse',
+  grid_id = "grid",
+  decreasing = FALSE
+)
+data.frame(resultados_grid@summary_table)
+
+
+# Mejor modelo encontrado
+# ==============================================================================
+modelo_final <- h2o.getModel(resultados_grid@model_ids[[1]])
+
+
+
+#error del test
+
+predicciones1 <- h2o.predict(
+  object  = modelo_final,
+  newdata = datos_test 
+)
+
+
+
+predicciones1 <- predicciones1 %>%
+  as_tibble() %>%
+  mutate(valor_real = as.vector(datos_test$`583`))
+
+predicciones1
+
+modelo_final <- h2o.getModel(resultados_grid@model_ids[[2]])
+
+
+
+#error del test
+
+predicciones2 <- h2o.predict(
+  object  = modelo_final,
+  newdata = datos_test 
+)
+
+
+
+predicciones2 <- predicciones2 %>%
+  as_tibble() %>%
+  mutate(valor_real = as.vector(datos_test$`583`))
+predicciones2
+
+modelo_final <- h2o.getModel(resultados_grid@model_ids[[3]])
+
+
+
+#error del test
+
+predicciones3 <- h2o.predict(
+  object  = modelo_final,
+  newdata = datos_test 
+)
+
+
+
+predicciones3 <- predicciones3 %>%
+  as_tibble() %>%
+  mutate(valor_real = as.vector(datos_test$`583`))
+predicciones3
+
+modelos<-data.frame(resultados_grid@summary_table)
+
+datomodelo<-data.frame()
+datomodelo<-modelos[1,]
+datomodelo<-rbind(datomodelo,modelos[2,])
+datomodelo<-rbind(datomodelo,modelos[3,])
+
+prediccionesdatos<-data.frame()
+prediccionesdatos<-predicciones1
+prediccionesdatos<-rbind(prediccionesdatos,predicciones2)
+prediccionesdatos<-rbind(prediccionesdatos,predicciones3)
+
+
+datomodelo
+print(prediccionesdatos, n=30)
+
+todosdatosmodelo<-rbind(todosdatosmodelo,datomodelo)
+todosdatospredict<-rbind(todosdatospredict,prediccionesdatos)
+
+
+
+install.packages("xlsx")
+library(xlsx)
+write.xlsx(todosdatosmodelo, "datosmodelos.xlsx")
+
+write.xlsx(todosdatospredict, "datosprediccion.xlsx")
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+predicciones %>% head(10)
+predicciones
+
+resultadosmodelo<-data.frame()
+resultadosmodelo<-predicciones
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+h2o.init(
+  nthreads = -1,
+  max_mem_size = "4g"
+)
+h2o.removeAll()
+h2o.no_progress()
+
+
+set.seed(123)
+split_inicial2 <- initial_split(
+  data   = espectros,
+  prop   = 0.8,
+  strata = `1250`
+)
+
+datos_train2 <- training(split_inicial2)
+datos_test2  <- testing(split_inicial2)
+
+summary(datos_train2$`1250`)
+summary(datos_test2$`1250`)
+
+#aplicar el pretratamiento de los datos
+transformer2 <- recipe(
+  formula = . ~ .,
+  data =  datos_train2
+) %>%
+  update_role(c(method,matrix,time),new_role = "predictor") %>%
+  step_naomit(all_predictors()) %>%
+  step_nzv(all_predictors()) %>%
+  step_center(all_numeric(), -all_outcomes()) %>%
+  step_scale(all_numeric(), -all_outcomes()) %>%
+  step_dummy(all_nominal(), -all_outcomes())
+
+transformer2
+
+# Se entrena el objeto recipe
+transformer_fit2 <- prep(transformer2)
+
+# Se aplican las transformaciones al conjunto de entrenamiento y de test
+datos_train_prep2 <- bake(transformer_fit2, new_data = datos_train2)
+datos_test_prep2  <- bake(transformer_fit2, new_data = datos_test2)
+
+glimpse(datos_train_prep2)
+
+
+#trasnferir al cluster
+datos_train2  <- as.h2o(datos_train_prep2, key = "datos_train")
+datos_test2   <- as.h2o(datos_test_prep2, key = "datos_test")
+
+
+
+# Búsqueda por validación cruzada
+# ==============================================================================
+variable_respuesta2 <- '1250'
+predictores2 <- c("method_PF","method_P","matrix_NaCl","matrix_MQ","time")
+
+grid <- h2o.grid(
+  algorithm    = "deeplearning",
+  activation   = "Rectifier",
+  x            = predictores2,
+  y            = variable_respuesta2,
+  training_frame  = datos_train2,
+  nfolds       = 3, #validacion cruzada
+  standardize  = FALSE,
+  hyper_params = hiperparametros,
+  search_criteria = list(strategy = "Cartesian"),
+  seed         = 123,
+  grid_id      = "grid"
+)
+
+# Resultados del grid
+# ==============================================================================
+resultados_grid2 <- h2o.getGrid(
+  sort_by = 'rmse',
+  grid_id = "grid",
+  decreasing = FALSE
+)
+data.frame(resultados_grid2@summary_table)
+
+
+# Mejor modelo encontrado
+# ==============================================================================
+modelo_final2 <- h2o.getModel(resultados_grid2@model_ids[[1]])
+
+
+
+#error del test
+
+predicciones <- h2o.predict(
+  object  = modelo_final2,
+  newdata = datos_test2 
+)
+
+
+
+predicciones <- predicciones %>%
+  as_tibble() %>%
+  mutate(valor_real = as.vector(datos_test2$`1250`))
+
+predicciones %>% head(10)
+
+resultadosmodelo2<-data.frame()
+resultadosmodelo2<-predicciones
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+h2o.init(
+  nthreads = -1,
+  max_mem_size = "4g"
+)
+h2o.removeAll()
+h2o.no_progress()
+
+set.seed(123)
+split_inicial3 <- initial_split(
+  data   = espectros,
+  prop   = 0.8,
+  strata = `203`
+)
+
+datos_train3 <- training(split_inicial3)
+datos_test3  <- testing(split_inicial3)
+
+summary(datos_train3$`203`)
+summary(datos_test3$`203`)
+
+#aplicar el pretratamiento de los datos
+transformer3 <- recipe(
+  formula = . ~ .,
+  data =  datos_train3
+) %>%
+  update_role(c(method,matrix,time),new_role = "predictor") %>%
+  step_naomit(all_predictors()) %>%
+  step_nzv(all_predictors()) %>%
+  step_center(all_numeric(), -all_outcomes()) %>%
+  step_scale(all_numeric(), -all_outcomes()) %>%
+  step_dummy(all_nominal(), -all_outcomes())
+
+transformer3
+
+# Se entrena el objeto recipe
+transformer_fit3 <- prep(transformer3)
+
+# Se aplican las transformaciones al conjunto de entrenamiento y de test
+datos_train_prep3 <- bake(transformer_fit3, new_data = datos_train3)
+datos_test_prep3  <- bake(transformer_fit3, new_data = datos_test3)
+
+glimpse(datos_train_prep3)
+
+
+#trasnferir al cluster
+datos_train3  <- as.h2o(datos_train_prep3, key = "datos_train")
+datos_test3   <- as.h2o(datos_test_prep3, key = "datos_test")
+
+
+
+# Búsqueda por validación cruzada
+# ==============================================================================
+variable_respuesta3 <- '203'
+predictores3 <- c("method_PF","method_P","matrix_NaCl","matrix_MQ","time")
+
+grid <- h2o.grid(
+  algorithm    = "deeplearning",
+  activation   = "Rectifier",
+  x            = predictores3,
+  y            = variable_respuesta3,
+  training_frame  = datos_train3,
+  nfolds       = 3, #validacion cruzada
+  standardize  = FALSE,
+  hyper_params = hiperparametros,
+  search_criteria = list(strategy = "Cartesian"),
+  seed         = 123,
+  grid_id      = "grid"
+)
+
+# Resultados del grid
+# ==============================================================================
+resultados_grid3 <- h2o.getGrid(
+  sort_by = 'rmse',
+  grid_id = "grid",
+  decreasing = FALSE
+)
+data.frame(resultados_grid3@summary_table)
+
+
+# Mejor modelo encontrado
+# ==============================================================================
+modelo_final3 <- h2o.getModel(resultados_grid3@model_ids[[1]])
+
+
+
+#error del test
+
+predicciones <- h2o.predict(
+  object  = modelo_final3,
+  newdata = datos_test3 
+)
+
+
+
+predicciones <- predicciones %>%
+  as_tibble() %>%
+  mutate(valor_real = as.vector(datos_test3$`203`))
+
+predicciones %>% head(10)
+
+resultadosmodelo3<-data.frame()
+resultadosmodelo3<-predicciones
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+h2o.init(
+  nthreads = -1,
+  max_mem_size = "4g"
+)
+h2o.removeAll()
+h2o.no_progress()
+
+
+
+set.seed(123)
+split_inicial4 <- initial_split(
+  data   = espectros,
+  prop   = 0.8,
+  strata = `107`
+)
+
+datos_train4 <- training(split_inicial4)
+datos_test4  <- testing(split_inicial4)
+
+summary(datos_train4$`107`)
+summary(datos_test4$`107`)
+
+#aplicar el pretratamiento de los datos
+transformer4 <- recipe(
+  formula = . ~ .,
+  data =  datos_train4
+) %>%
+  update_role(c(method,matrix,time),new_role = "predictor") %>%
+  step_naomit(all_predictors()) %>%
+  step_nzv(all_predictors()) %>%
+  step_center(all_numeric(), -all_outcomes()) %>%
+  step_scale(all_numeric(), -all_outcomes()) %>%
+  step_dummy(all_nominal(), -all_outcomes())
+
+transformer
+
+# Se entrena el objeto recipe
+transformer_fit4 <- prep(transformer4)
+
+# Se aplican las transformaciones al conjunto de entrenamiento y de test
+datos_train_prep4 <- bake(transformer_fit4, new_data = datos_train4)
+datos_test_prep4  <- bake(transformer_fit4, new_data = datos_test4)
+
+glimpse(datos_train_prep4)
+
+
+#trasnferir al cluster
+datos_train4  <- as.h2o(datos_train_prep4, key = "datos_train")
+datos_test4   <- as.h2o(datos_test_prep4, key = "datos_test")
+
+
+
+# Búsqueda por validación cruzada
+# ==============================================================================
+variable_respuesta4 <- '107'
+predictores4 <- c("method_PF","method_P","matrix_NaCl","matrix_MQ","time")
+
+grid <- h2o.grid(
+  algorithm    = "deeplearning",
+  activation   = "Rectifier",
+  x            = predictores4,
+  y            = variable_respuesta4,
+  training_frame  = datos_train4,
+  nfolds       = 3, #validacion cruzada
+  standardize  = FALSE,
+  hyper_params = hiperparametros,
+  search_criteria = list(strategy = "Cartesian"),
+  seed         = 123,
+  grid_id      = "grid"
+)
+
+# Resultados del grid
+# ==============================================================================
+resultados_grid4 <- h2o.getGrid(
+  sort_by = 'rmse',
+  grid_id = "grid",
+  decreasing = FALSE
+)
+data.frame(resultados_grid4@summary_table)
+
+
+# Mejor modelo encontrado
+# ==============================================================================
+modelo_final4 <- h2o.getModel(resultados_grid4@model_ids[[1]])
+
+
+
+#error del test
+
+predicciones <- h2o.predict(
+  object  = modelo_final4,
+  newdata = datos_test4 
+)
+
+
+
+predicciones <- predicciones %>%
+  as_tibble() %>%
+  mutate(valor_real = as.vector(datos_test4$`107`))
+
+predicciones %>% head(10)
+
+resultadosmodelo4<-data.frame()
+resultadosmodelo4<-predicciones
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+h2o.init(
+  nthreads = -1,
+  max_mem_size = "4g"
+)
+h2o.removeAll()
+h2o.no_progress()
+
+
+
+set.seed(123)
+split_inicial5 <- initial_split(
+  data   = espectros,
+  prop   = 0.8,
+  strata = `181`
+)
+
+datos_train5 <- training(split_inicial5)
+datos_test5  <- testing(split_inicial5)
+
+summary(datos_train5$`181`)
+summary(datos_test5$`181`)
+
+#aplicar el pretratamiento de los datos
+transformer5 <- recipe(
+  formula = . ~ .,
+  data =  datos_train5
+) %>%
+  update_role(c(method,matrix,time),new_role = "predictor") %>%
+  step_naomit(all_predictors()) %>%
+  step_nzv(all_predictors()) %>%
+  step_center(all_numeric(), -all_outcomes()) %>%
+  step_scale(all_numeric(), -all_outcomes()) %>%
+  step_dummy(all_nominal(), -all_outcomes())
+
+transformer5
+
+# Se entrena el objeto recipe
+transformer_fit5 <- prep(transformer5)
+
+# Se aplican las transformaciones al conjunto de entrenamiento y de test
+datos_train_prep5 <- bake(transformer_fit5, new_data = datos_train5)
+datos_test_prep5  <- bake(transformer_fit5, new_data = datos_test5)
+
+glimpse(datos_train_prep5)
+
+
+#trasnferir al cluster
+datos_train5  <- as.h2o(datos_train_prep5, key = "datos_train")
+datos_test5   <- as.h2o(datos_test_prep5, key = "datos_test")
+
+
+
+# Búsqueda por validación cruzada
+# ==============================================================================
+variable_respuesta5 <- '181'
+predictores5 <- c("method_PF","method_P","matrix_NaCl","matrix_MQ","time")
+
+grid <- h2o.grid(
+  algorithm    = "deeplearning",
+  activation   = "Rectifier",
+  x            = predictores5,
+  y            = variable_respuesta5,
+  training_frame  = datos_train5,
+  nfolds       = 3, #validacion cruzada
+  standardize  = FALSE,
+  hyper_params = hiperparametros,
+  search_criteria = list(strategy = "Cartesian"),
+  seed         = 123,
+  grid_id      = "grid"
+)
+
+# Resultados del grid
+# ==============================================================================
+resultados_grid5 <- h2o.getGrid(
+  sort_by = 'rmse',
+  grid_id = "grid",
+  decreasing = FALSE
+)
+data.frame(resultados_grid5@summary_table)
+
+
+# Mejor modelo encontrado
+# ==============================================================================
+modelo_final5 <- h2o.getModel(resultados_grid5@model_ids[[1]])
+
+
+
+#error del test
+
+predicciones <- h2o.predict(
+  object  = modelo_final5,
+  newdata = datos_test5 
+)
+
+
+
+predicciones <- predicciones %>%
+  as_tibble() %>%
+  mutate(valor_real = as.vector(datos_test5$`107`))
+
+predicciones %>% head(10)
+
+resultadosmodelo5<-data.frame()
+resultadosmodelo5<-predicciones
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+h2o.init(
+  nthreads = -1,
+  max_mem_size = "4g"
+)
+h2o.removeAll()
+h2o.no_progress()
+
+
+set.seed(123)
+split_inicial6 <- initial_split(
+  data   = espectros,
+  prop   = 0.8,
+  strata = `529`
+)
+
+datos_train6 <- training(split_inicial6)
+datos_test6  <- testing(split_inicial6)
+
+summary(datos_train6$`529`)
+summary(datos_test6$`529`)
+
+#aplicar el pretratamiento de los datos
+transformer6 <- recipe(
+  formula = . ~ .,
+  data =  datos_train6
+) %>%
+  update_role(c(method,matrix,time),new_role = "predictor") %>%
+  step_naomit(all_predictors()) %>%
+  step_nzv(all_predictors()) %>%
+  step_center(all_numeric(), -all_outcomes()) %>%
+  step_scale(all_numeric(), -all_outcomes()) %>%
+  step_dummy(all_nominal(), -all_outcomes())
+
+transformer6
+
+# Se entrena el objeto recipe
+transformer_fit6 <- prep(transformer6)
+
+# Se aplican las transformaciones al conjunto de entrenamiento y de test
+datos_train_prep6 <- bake(transformer_fit6, new_data = datos_train6)
+datos_test_prep6  <- bake(transformer_fit6, new_data = datos_test6)
+
+glimpse(datos_train_prep6)
+
+
+#trasnferir al cluster
+datos_train6  <- as.h2o(datos_train_prep6, key = "datos_train")
+datos_test6   <- as.h2o(datos_test_prep6, key = "datos_test")
+
+
+
+# Búsqueda por validación cruzada
+# ==============================================================================
+variable_respuesta6 <- '529'
+predictores6 <- c("method_PF","method_P","matrix_NaCl","matrix_MQ","time")
+
+grid <- h2o.grid(
+  algorithm    = "deeplearning",
+  activation   = "Rectifier",
+  x            = predictores6,
+  y            = variable_respuesta6,
+  training_frame  = datos_train6,
+  nfolds       = 3, #validacion cruzada
+  standardize  = FALSE,
+  hyper_params = hiperparametros,
+  search_criteria = list(strategy = "Cartesian"),
+  seed         = 123,
+  grid_id      = "grid"
+)
+
+# Resultados del grid
+# ==============================================================================
+resultados_grid6 <- h2o.getGrid(
+  sort_by = 'rmse',
+  grid_id = "grid",
+  decreasing = FALSE
+)
+data.frame(resultados_grid6@summary_table)
+
+
+# Mejor modelo encontrado
+# ==============================================================================
+modelo_final6 <- h2o.getModel(resultados_grid6@model_ids[[1]])
+
+
+
+#error del test
+
+predicciones <- h2o.predict(
+  object  = modelo_final6,
+  newdata = datos_test6 
+)
+
+
+
+predicciones <- predicciones %>%
+  as_tibble() %>%
+  mutate(valor_real = as.vector(datos_test6$`529`))
+
+predicciones %>% head(10)
+
+resultadosmodelo6<-data.frame()
+resultadosmodelo6<-predicciones
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+h2o.init(
+  nthreads = -1,
+  max_mem_size = "4g"
+)
+h2o.removeAll()
+h2o.no_progress()
+
+
+
+
+set.seed(123)
+split_inicial7 <- initial_split(
+  data   = espectros,
+  prop   = 0.8,
+  strata = `673`
+)
+
+datos_train7 <- training(split_inicial7)
+datos_test7  <- testing(split_inicial7)
+
+summary(datos_train7$`673`)
+summary(datos_test7$`673`)
+
+#aplicar el pretratamiento de los datos
+transformer7 <- recipe(
+  formula = . ~ .,
+  data =  datos_train7
+) %>%
+  update_role(c(method,matrix,time),new_role = "predictor") %>%
+  step_naomit(all_predictors()) %>%
+  step_nzv(all_predictors()) %>%
+  step_center(all_numeric(), -all_outcomes()) %>%
+  step_scale(all_numeric(), -all_outcomes()) %>%
+  step_dummy(all_nominal(), -all_outcomes())
+
+transformer7
+
+# Se entrena el objeto recipe
+transformer_fit7 <- prep(transformer7)
+
+# Se aplican las transformaciones al conjunto de entrenamiento y de test
+datos_train_prep7 <- bake(transformer_fit7, new_data = datos_train7)
+datos_test_prep7  <- bake(transformer_fit7, new_data = datos_test7)
+
+glimpse(datos_train_prep7)
+
+
+#trasnferir al cluster
+datos_train7  <- as.h2o(datos_train_prep7, key = "datos_train")
+datos_test7   <- as.h2o(datos_test_prep7, key = "datos_test")
+
+
+
+# Búsqueda por validación cruzada
+# ==============================================================================
+variable_respuesta7 <- '673'
+predictores7 <- c("method_PF","method_P","matrix_NaCl","matrix_MQ","time")
+
+grid <- h2o.grid(
+  algorithm    = "deeplearning",
+  activation   = "Rectifier",
+  x            = predictores7,
+  y            = variable_respuesta7,
+  training_frame  = datos_train7,
+  nfolds       = 3, #validacion cruzada
+  standardize  = FALSE,
+  hyper_params = hiperparametros,
+  search_criteria = list(strategy = "Cartesian"),
+  seed         = 123,
+  grid_id      = "grid"
+)
+
+# Resultados del grid
+# ==============================================================================
+resultados_grid7 <- h2o.getGrid(
+  sort_by = 'rmse',
+  grid_id = "grid",
+  decreasing = FALSE
+)
+data.frame(resultados_grid7@summary_table)
+
+
+# Mejor modelo encontrado
+# ==============================================================================
+modelo_final7 <- h2o.getModel(resultados_grid7@model_ids[[1]])
+
+
+
+#error del test
+
+predicciones <- h2o.predict(
+  object  = modelo_final7,
+  newdata = datos_test7 
+)
+
+
+
+predicciones <- predicciones %>%
+  as_tibble() %>%
+  mutate(valor_real = as.vector(datos_test7$`673`))
+
+predicciones %>% head(10)
+
+resultadosmodelo7<-data.frame()
+resultadosmodelo7<-predicciones
+
+
+
+y<-1:9
+dim(y)<-c(3,3)
+
+fact<-factor(c("rep","dem","dem","rep"))
+fact
+fact[2]<-"ind"
+
+v<-1:3
+names(v)<-c("print(v)a","b","c")
+v[4]<-4
